@@ -60,7 +60,8 @@ INT_NODES = [
     "manufacturing_date",   # battery manufacture date (unix epoch seconds)
     "first_usage_date",     # first power-on date (unix epoch seconds; 0 if unset)
 ]
-STR_NODES = ["health", "status", "technology", "serial_number"]
+STR_NODES = ["health", "status", "technology", "serial_number",
+             "cycle_counts", "swelling_data"]
 
 # Epoch nodes where a literal 0 means "not recorded" rather than 1970.
 EPOCH_NODES = ["manufacturing_date", "first_usage_date"]
@@ -163,8 +164,9 @@ def read_battery(serial: str) -> dict:
     """Read all battery nodes + model in a single adb shell round-trip."""
     nodes = INT_NODES + STR_NODES
     # Build a tiny shell script that prints key=value for each node.
+    # Flatten newlines so multi-line nodes (swelling_data) stay on one line.
     script_lines = [
-        f'v=$(cat {POWER_SUPPLY}/{n} 2>/dev/null); echo "{n}=$v"'
+        f'v=$(cat {POWER_SUPPLY}/{n} 2>/dev/null | tr "\\n" " "); echo "{n}=$v"'
         for n in nodes
     ]
     script_lines.append('echo "model=$(getprop ro.product.model)"')
@@ -232,17 +234,21 @@ def db_connect() -> sqlite3.Connection:
             resistance_uohm        INTEGER,
             manufacturing_epoch    INTEGER,
             first_usage_epoch      INTEGER,
-            battery_serial         TEXT
+            battery_serial         TEXT,
+            cycle_counts_raw       TEXT,
+            swelling_raw           TEXT
         )
         """
     )
-    # Migrate older databases that predate the spec columns.
+    # Migrate older databases that predate newer columns.
     existing = {row[1] for row in conn.execute("PRAGMA table_info(samples)")}
     for col, decl in [
         ("resistance_uohm", "INTEGER"),
         ("manufacturing_epoch", "INTEGER"),
         ("first_usage_epoch", "INTEGER"),
         ("battery_serial", "TEXT"),
+        ("cycle_counts_raw", "TEXT"),
+        ("swelling_raw", "TEXT"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE samples ADD COLUMN {col} {decl}")
@@ -262,8 +268,8 @@ def store_sample(data: dict, serial: str) -> int:
             charge_counter_uah, capacity_pct, voltage_uv, current_ua,
             temp_decic, health, status, technology,
             resistance_uohm, manufacturing_epoch, first_usage_epoch,
-            battery_serial
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            battery_serial, cycle_counts_raw, swelling_raw
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             now.isoformat(timespec="seconds"),
@@ -287,6 +293,8 @@ def store_sample(data: dict, serial: str) -> int:
             data.get("manufacturing_date"),
             data.get("first_usage_date"),
             data.get("serial_number"),
+            data.get("cycle_counts"),
+            data.get("swelling_data"),
         ),
     )
     conn.commit()
@@ -479,6 +487,86 @@ def period_deltas(rows, key: str, granularity: str) -> dict:
             buckets[t.strftime(fmt)] = buckets.get(t.strftime(fmt), 0.0) + (v - pv)
         prev = (v, t)
     return buckets
+
+
+# --------------------------------------------------------------------------- #
+# Lifetime usage-distribution parsers (retrospective, condition-bucketed)
+# --------------------------------------------------------------------------- #
+
+def parse_cycle_counts(raw):
+    """`cycle_counts` = accumulated cycle activity across 10 charge-level bands
+    (low -> high state of charge). Returns a list of ints or None."""
+    if not raw:
+        return None
+    vals = []
+    for tok in raw.replace(",", " ").split():
+        try:
+            vals.append(int(tok))
+        except ValueError:
+            pass
+    return vals or None
+
+
+def parse_swelling(raw):
+    """`swelling_data` = cumulative seconds spent charging / discharging at each
+    (temperature, state-of-charge) bucket. Returns list of dicts or None."""
+    if not raw:
+        return None
+    import re
+    rows = []
+    for m in re.finditer(r"(\d+)/(\d+)\s+(\d+)\s+(\d+)", raw):
+        t, soc, chg, dis = (int(g) for g in m.groups())
+        rows.append({"temp": t, "soc": soc, "charge_s": chg, "discharge_s": dis})
+    return rows or None
+
+
+def render_cycle_distribution(vals) -> str:
+    total = sum(vals) or 1
+    peak = max(vals) or 1
+    n = len(vals)
+    bars = []
+    for i, v in enumerate(vals):
+        lo, hi = round(i * 100 / n), round((i + 1) * 100 / n)
+        share = v / total * 100
+        width = v / peak * 100
+        bars.append(
+            f'<div class="barrow"><span class="barlabel mono">{lo}–{hi}%</span>'
+            f'<span class="bartrack"><span class="barfill" '
+            f'style="width:{width:.1f}%"></span></span>'
+            f'<span class="barval mono">{share:.0f}%</span></div>')
+    return (
+        '<div class="chart"><h3>Where your cycles happen</h3>'
+        '<div class="chartsub">Share of lifetime cycling by charge level '
+        '(low → high)</div>'
+        f'{"".join(bars)}'
+        '<div class="note">Bands are the fuel gauge\'s ten charge-level buckets; '
+        'boundaries are approximate. Cycling concentrated in the middle of the '
+        'range is gentler on the cell than heavy time at the extremes.</div></div>')
+
+
+def render_stress_profile(swell) -> str:
+    def hrs(s):
+        return f"{s / 3600:.0f} h" if s else "0"
+    trows = []
+    for r in sorted(swell, key=lambda x: (-x["temp"], -x["soc"])):
+        total_h = (r["charge_s"] + r["discharge_s"]) / 3600
+        hot = r["temp"] >= 35 and r["soc"] >= 80
+        tag = ('<span class="tag warn">high stress</span>'
+               if hot and total_h > 1 else "")
+        trows.append(
+            f'<tr><td>{r["temp"]}°C</td><td>{r["soc"]}%</td>'
+            f'<td>{hrs(r["charge_s"])}</td><td>{hrs(r["discharge_s"])}</td>'
+            f'<td>{tag}</td></tr>')
+    return (
+        '<div class="chart"><h3>Temperature &amp; charge stress</h3>'
+        '<div class="chartsub">Lifetime hours spent at each temperature / '
+        'charge-level combination</div>'
+        '<table class="tbl"><thead><tr><th>Temp</th><th>Charge</th>'
+        '<th>Charging</th><th>Discharging</th><th></th></tr></thead>'
+        f'<tbody>{"".join(trows)}</tbody></table>'
+        '<div class="note">Heat combined with a high charge level is the biggest '
+        'driver of lithium-ion aging. Long hours in the high-temp, high-charge '
+        'rows accelerate capacity fade.</div></div>')
 
 
 # --------------------------------------------------------------------------- #
@@ -790,6 +878,24 @@ def build_dashboard(rows) -> str:
         f'<div class="mv">{most_aging}</div></div>'
         '</div></section>')
 
+    # ---- Lifetime usage distribution (retrospective, available now) ----- #
+    cc = parse_cycle_counts(latest["cycle_counts_raw"])
+    sw = parse_swelling(latest["swelling_raw"])
+    usage_parts = []
+    if cc:
+        usage_parts.append(render_cycle_distribution(cc))
+    if sw:
+        usage_parts.append(render_stress_profile(sw))
+    if usage_parts:
+        usage = ('<section class="panel"><h2>How this battery has been used</h2>'
+                 '<div class="note" style="margin:0 0 12px">Whole-life data the '
+                 'fuel gauge has accumulated — organised by condition, not by '
+                 'date.</div>'
+                 f'<section class="charts">{"".join(usage_parts)}</section>'
+                 '</section>')
+    else:
+        usage = ''
+
     charts = "".join([
         render_chart(rows, "soh_pct", "State of Health over time", "%",
                      lambda v: f"{v:.1f}%", threshold=REPLACE_SOH_PCT),
@@ -819,6 +925,7 @@ def build_dashboard(rows) -> str:
       {lifetime}
       {outlook}
       {analytics}
+      {usage}
       <section class="charts">{charts}</section>
       <footer>
         SoH = current full-charge capacity ÷ factory design capacity.
@@ -893,6 +1000,13 @@ HTML_SHELL = """<!doctype html>
   .minicard .label {{ color:var(--muted); font-size:12px; text-transform:uppercase;
     letter-spacing:.04em; margin-bottom:5px; }}
   .minicard .mv {{ font-size:15px; }}
+  .barrow {{ display:flex; align-items:center; gap:12px; margin:6px 0; }}
+  .barlabel {{ width:64px; font-size:12px; color:var(--muted); text-align:right; }}
+  .bartrack {{ flex:1; height:16px; background:var(--grid); border-radius:5px;
+    overflow:hidden; }}
+  .barfill {{ display:block; height:100%; background:var(--accent);
+    border-radius:5px; }}
+  .barval {{ width:40px; font-size:12px; color:var(--muted); }}
   .charts {{ display:flex; flex-direction:column; gap:18px; }}
   .chart {{ background:var(--panel); border:1px solid var(--line);
     border-radius:12px; padding:14px 16px; overflow-x:auto; }}
