@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Battery Health — Dashboard Directions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#e6e4dd;font-family:'Space Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#1a1c1a}
+  .turn{padding:48px 52px 56px}
+  .thd{display:flex;align-items:baseline;gap:10px;margin:0 0 28px;flex-wrap:wrap}
+  .tid{font:600 10px 'IBM Plex Mono',monospace;padding:4px 8px;background:#1a1c1a;color:#fff;border-radius:5px}
+  .tname{font:500 13px/1.4 'Space Grotesk',sans-serif;color:#2a2c28}
+  .opts{display:flex;flex-wrap:wrap;gap:44px;align-items:flex-start}
+  .opt{flex:none;display:flex;flex-direction:column;gap:14px}
+  .olabel{display:flex;align-items:baseline;gap:10px;max-width:360px}
+  .oid{font:600 11px 'IBM Plex Mono',monospace;padding:4px 8px;background:rgba(0,0,0,.09);color:#1a1c1a;border-radius:6px}
+  .otitle{font:600 14px/1.35 'Space Grotesk',sans-serif;color:#1a1c1a}
+  .odesc{font:400 12.5px/1.5 'Space Grotesk',sans-serif;color:#6a6c64;margin-top:3px}
+  .next{margin:38px 0 0;font:400 12.5px/1.7 'Space Grotesk',sans-serif;color:#7a7c72}
+  .next b{color:#3a6b4a;font-weight:600}
+  .ph{width:360px;height:760px;background:linear-gradient(150deg,#050705,#141613);border-radius:46px;padding:8px;box-shadow:0 40px 80px -30px rgba(0,0,0,.5),0 4px 14px rgba(0,0,0,.2),inset 0 0 0 1.5px rgba(255,255,255,.06)}
+  .scr{position:relative;width:100%;height:100%;background:#0b0d0b;border-radius:39px;overflow:hidden;color:#edefe9}
+  .cam{position:absolute;top:14px;left:50%;transform:translateX(-50%);width:9px;height:9px;border-radius:50%;background:#000;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.09);z-index:5}
+  .stat{display:flex;align-items:center;justify-content:space-between;padding:15px 24px 0;font:500 13px 'Space Grotesk',sans-serif;color:#cfd3ca}
+  .statR{display:flex;align-items:center;gap:6px}
+  .bars{display:flex;align-items:flex-end;gap:2px;height:10px}
+  .bars i{width:3px;background:#cfd3ca;border-radius:1px}
+  .batt{width:22px;height:11px;border:1.4px solid #cfd3ca;border-radius:3px;position:relative;padding:1.4px}
+  .batt::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:5px;background:#cfd3ca;border-radius:0 1px 1px 0}
+  .battfill{height:100%;width:84%;background:#86bd7a;border-radius:1px}
+  .nav{position:absolute;bottom:0;left:0;right:0;height:74px;display:flex;align-items:flex-start;justify-content:space-around;padding:14px 30px 0;background:linear-gradient(0deg,rgba(11,13,11,.98),rgba(11,13,11,0));border-top:1px solid rgba(255,255,255,.05)}
+  .navi{display:flex;flex-direction:column;align-items:center;gap:7px;font:500 10.5px 'Space Grotesk',sans-serif;color:#5c635a}
+  .navi.on{color:#86bd7a}
+  .navdot{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .navdot.o{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  @keyframes fill{from{height:0}to{height:87%}}
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes dash{to{stroke-dashoffset:0}}
+</style>
+</head>
+<body>
+<section class="turn">
+  <div class="thd"><span class="tid">1</span><span class="tname">Main dashboard — three directions · dark, natural green, everyday-friendly</span></div>
+  <div class="opts">
+
+    <!-- 1a -->
+    <div class="opt" id="1a">
+      <div class="olabel"><span class="oid">1a</span><div><div class="otitle">Editorial</div><div class="odesc">Type-led and calm. One honest number, one quiet line. Reads like a health readout, not a gauge.</div></div></div>
+      <div class="ph"><div class="scr">
+        <div class="cam"></div>
+        <div class="stat"><span>9:41</span><div class="statR"><div class="bars"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"><div class="battfill"></div></div></div></div>
+        <div style="padding:44px 30px 0;display:flex;flex-direction:column;height:calc(100% - 40px)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;animation:rise .5s .05s both">
+            <span class="mono" style="font-size:11px;letter-spacing:.14em;color:#8a9186">STATE OF HEALTH</span>
+            <span class="mono" style="font-size:11px;color:#6a7268">Pixel 7 · 2y 10m</span>
+          </div>
+          <div style="margin-top:26px;display:flex;align-items:flex-start;animation:rise .6s .1s both">
+            <span style="font-size:132px;line-height:.82;font-weight:600;letter-spacing:-.04em">87</span>
+            <span style="font-size:40px;font-weight:400;color:#8a9186;margin-top:8px">%</span>
+          </div>
+          <div style="margin-top:22px;display:flex;align-items:center;gap:10px;animation:rise .6s .16s both">
+            <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(134,189,122,.12);border:1px solid rgba(134,189,122,.28);color:#9ecf90;padding:6px 13px;border-radius:100px;font-size:12.5px;font-weight:500"><span style="width:7px;height:7px;border-radius:50%;background:#86bd7a"></span>Good condition</span>
+          </div>
+          <p style="margin:20px 0 0;font-size:14.5px;line-height:1.55;color:#b9bfb2;max-width:250px;animation:rise .6s .22s both">Your battery holds <b style="color:#edefe9">87%</b> of the charge it did new. That's normal for its age.</p>
+          <div style="margin-top:30px;animation:rise .6s .28s both">
+            <div class="mono" style="font-size:10px;letter-spacing:.12em;color:#6a7268;margin-bottom:12px">CAPACITY OVER 34 MONTHS</div>
+            <svg width="300" height="76" viewBox="0 0 300 76" fill="none" style="overflow:visible">
+              <line x1="0" y1="12" x2="300" y2="12" stroke="rgba(255,255,255,.06)"/>
+              <line x1="0" y1="62" x2="300" y2="62" stroke="rgba(255,255,255,.06)"/>
+              <path d="M0,10 C70,13 150,26 300,40" stroke="#86bd7a" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="340" stroke-dashoffset="340" style="animation:dash 1.4s .3s both ease-out"/>
+              <circle cx="300" cy="40" r="4.5" fill="#86bd7a"/>
+              <circle cx="300" cy="40" r="9" fill="#86bd7a" opacity=".18"/>
+              <text x="0" y="76" fill="#6a7268" font-size="10" font-family="IBM Plex Mono">100% new</text>
+              <text x="235" y="76" fill="#8a9186" font-size="10" font-family="IBM Plex Mono">today</text>
+            </svg>
+          </div>
+          <div style="margin-top:auto;margin-bottom:88px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;animation:rise .6s .34s both">
+            <div><div class="mono" style="font-size:16px;font-weight:500">3,789</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:3px">mAh NOW</div></div>
+            <div><div class="mono" style="font-size:16px;font-weight:500">4,355</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:3px">mAh NEW</div></div>
+            <div><div class="mono" style="font-size:16px;font-weight:500">612</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:3px">CYCLES</div></div>
+          </div>
+        </div>
+        <div class="nav"><div class="navi on"><span class="navdot"></span>Health</div><div class="navi"><span class="navdot o"></span>Trends</div><div class="navi"><span class="navdot o"></span>Diagnose</div></div>
+      </div></div>
+    </div>
+
+    <!-- 1b -->
+    <div class="opt" id="1b">
+      <div class="olabel"><span class="oid">1b</span><div><div class="otitle">The Vessel</div><div class="odesc">A physical capacity metaphor — the battery is a container filled to what it can still hold. Tactile, instantly legible.</div></div></div>
+      <div class="ph"><div class="scr">
+        <div class="cam"></div>
+        <div class="stat"><span>9:41</span><div class="statR"><div class="bars"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"><div class="battfill"></div></div></div></div>
+        <div style="padding:30px 30px 0;display:flex;flex-direction:column;align-items:center;height:calc(100% - 40px)">
+          <div style="width:100%;display:flex;justify-content:space-between;align-items:baseline;animation:rise .5s both">
+            <span style="font-size:19px;font-weight:600">Battery health</span>
+            <span class="mono" style="font-size:11px;color:#6a7268">Pixel 7</span>
+          </div>
+          <div style="position:relative;margin-top:30px;width:186px;height:342px;border-radius:30px;background:#101310;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.07);overflow:hidden">
+            <div style="position:absolute;left:0;right:0;bottom:0;height:87%;background:linear-gradient(0deg,#5f9a52,#8ec47e);animation:fill 1.3s .2s both cubic-bezier(.4,0,.2,1)">
+              <div style="position:absolute;top:0;left:0;right:0;height:14px;background:linear-gradient(0deg,transparent,rgba(255,255,255,.22))"></div>
+            </div>
+            <div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:34px;animation:rise .6s .5s both">
+              <div style="display:flex;align-items:flex-start"><span style="font-size:66px;font-weight:600;line-height:.8;color:#0b1408">87</span><span style="font-size:22px;font-weight:500;margin-top:4px;color:#274018">%</span></div>
+              <span class="mono" style="font-size:10px;letter-spacing:.12em;color:rgba(11,20,8,.6);margin-top:6px">OF ORIGINAL</span>
+            </div>
+            <div style="position:absolute;right:12px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:space-between;padding:14px 0">
+              <span class="mono" style="font-size:9px;color:rgba(255,255,255,.28)">100</span>
+              <span class="mono" style="font-size:9px;color:rgba(255,255,255,.28)">75</span>
+              <span class="mono" style="font-size:9px;color:rgba(11,20,8,.4)">50</span>
+              <span class="mono" style="font-size:9px;color:rgba(11,20,8,.4)">25</span>
+            </div>
+          </div>
+          <p style="margin:24px 0 0;font-size:13.5px;color:#b9bfb2;animation:rise .6s .6s both"><b class="mono" style="color:#edefe9">3,789</b> of <b class="mono" style="color:#8a9186">4,355</b> mAh still usable</p>
+          <div style="margin-top:22px;width:100%;display:flex;gap:12px;animation:rise .6s .66s both">
+            <div style="flex:1;background:#151815;border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:15px 16px"><div class="mono" style="font-size:20px;font-weight:500">612</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:4px">CHARGE CYCLES</div></div>
+            <div style="flex:1;background:#151815;border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:15px 16px"><div class="mono" style="font-size:20px;font-weight:500">2y 10m</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:4px">SINCE MADE</div></div>
+          </div>
+        </div>
+        <div class="nav"><div class="navi on"><span class="navdot"></span>Health</div><div class="navi"><span class="navdot o"></span>Trends</div><div class="navi"><span class="navdot o"></span>Diagnose</div></div>
+      </div></div>
+    </div>
+
+    <!-- 1c -->
+    <div class="opt" id="1c">
+      <div class="olabel"><span class="oid">1c</span><div><div class="otitle">Lifespan</div><div class="odesc">Frames health as a life story from the manufacturing date, with a gentle forecast. Narrative, reassuring, non-technical.</div></div></div>
+      <div class="ph"><div class="scr">
+        <div class="cam"></div>
+        <div class="stat"><span>9:41</span><div class="statR"><div class="bars"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:10px"></i></div><div class="batt"><div class="battfill"></div></div></div></div>
+        <div style="padding:34px 28px 0;display:flex;flex-direction:column;height:calc(100% - 40px)">
+          <div style="animation:rise .5s both"><div class="mono" style="font-size:10px;letter-spacing:.14em;color:#6a7268">YOUR BATTERY'S LIFE</div><div style="font-size:24px;font-weight:600;margin-top:8px;line-height:1.15">Aging gracefully<br>at 2 years, 10 months</div></div>
+          <div style="margin-top:26px;display:flex;align-items:flex-end;gap:14px;animation:rise .6s .1s both">
+            <div style="display:flex;align-items:flex-start"><span style="font-size:78px;font-weight:600;line-height:.8;letter-spacing:-.03em">87</span><span style="font-size:26px;color:#8a9186;margin-top:5px">%</span></div>
+            <span style="margin-bottom:14px;color:#9ecf90;font-size:13.5px;font-weight:500">healthy</span>
+          </div>
+          <div style="margin-top:30px;animation:rise .6s .2s both">
+            <svg width="304" height="150" viewBox="0 0 304 150" fill="none" style="overflow:visible">
+              <line x1="0" y1="24" x2="304" y2="24" stroke="rgba(255,255,255,.05)"/>
+              <line x1="0" y1="130" x2="304" y2="130" stroke="rgba(255,255,255,.05)"/>
+              <text x="0" y="18" fill="#6a7268" font-size="9.5" font-family="IBM Plex Mono">100%</text>
+              <text x="0" y="128" fill="#6a7268" font-size="9.5" font-family="IBM Plex Mono">80%</text>
+              <path d="M4,26 C70,34 150,52 200,64" stroke="#86bd7a" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="260" stroke-dashoffset="260" style="animation:dash 1.5s .35s both ease-out"/>
+              <path d="M200,64 C240,74 275,100 300,124" stroke="#6a7268" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 6"/>
+              <circle cx="200" cy="64" r="5" fill="#86bd7a"/>
+              <circle cx="200" cy="64" r="11" fill="#86bd7a" opacity=".16"/>
+              <line x1="200" y1="64" x2="200" y2="142" stroke="rgba(134,189,122,.25)" stroke-dasharray="2 4"/>
+              <text x="4" y="148" fill="#8a9186" font-size="9.5" font-family="IBM Plex Mono">Sep 2023 · born</text>
+              <text x="176" y="148" fill="#9ecf90" font-size="9.5" font-family="IBM Plex Mono">today</text>
+              <text x="256" y="148" fill="#6a7268" font-size="9.5" font-family="IBM Plex Mono">~2027</text>
+            </svg>
+          </div>
+          <div style="margin-top:26px;display:flex;gap:13px;align-items:flex-start;background:#141813;border:1px solid rgba(134,189,122,.14);border-radius:18px;padding:16px 17px;animation:rise .6s .3s both">
+            <span style="flex:none;width:9px;height:9px;border-radius:50%;background:#86bd7a;margin-top:4px"></span>
+            <div><div style="font-size:13.5px;font-weight:500;line-height:1.4">Losing about 1% every 2 months</div><div style="font-size:12.5px;color:#8a9186;margin-top:4px;line-height:1.45">On this path you'll reach 80% — the usual replacement mark — around <b style="color:#b9bfb2">mid-2027</b>.</div></div>
+          </div>
+          <div style="margin-top:auto;margin-bottom:90px;display:flex;justify-content:space-between;animation:rise .6s .38s both">
+            <div><div class="mono" style="font-size:15px;font-weight:500">3,789 mAh</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:3px">HOLDS NOW</div></div>
+            <div style="text-align:right"><div class="mono" style="font-size:15px;font-weight:500">612</div><div class="mono" style="font-size:9.5px;color:#6a7268;margin-top:3px">CYCLES</div></div>
+          </div>
+        </div>
+        <div class="nav"><div class="navi on"><span class="navdot"></span>Health</div><div class="navi"><span class="navdot o"></span>Trends</div><div class="navi"><span class="navdot o"></span>Diagnose</div></div>
+      </div></div>
+    </div>
+
+  </div>
+  <p class="next">Try next: "build out <b>1b</b> into the full app — trends + diagnostics screens" · "make <b>1a</b> the base but borrow the forecast from <b>1c</b>" · "show a warning state (battery at 71%)" · "new directions, lighter theme"</p>
+</section>
+</body>
+</html>

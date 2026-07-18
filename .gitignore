@@ -1,0 +1,29 @@
+# ── Personal / generated data ────────────────────────────────
+# These contain device + battery serial numbers — never publish.
+desktop/battery_history.db
+desktop/dashboard.html
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.pyc
+
+# ── Android / Gradle ─────────────────────────────────────────
+.gradle/
+build/
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/local.properties
+android/app/release/
+*.iml
+
+# ── Signing — never commit keystores or their passwords ──────
+*.jks
+*.keystore
+keystore.properties
+
+# ── IDE / OS ─────────────────────────────────────────────────
+.idea/
+.DS_Store
+*.log
