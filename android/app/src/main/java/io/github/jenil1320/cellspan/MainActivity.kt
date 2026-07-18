@@ -33,6 +33,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.jenil1320.cellspan.ui.DiagnoseScreen
 import io.github.jenil1320.cellspan.ui.HealthScreen
 import io.github.jenil1320.cellspan.ui.MainViewModel
+import io.github.jenil1320.cellspan.ui.NowScreen
 import io.github.jenil1320.cellspan.ui.TrendsScreen
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.CellspanTheme
@@ -45,13 +46,13 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Tab(val label: String) {
-    HEALTH("Health"), TRENDS("Trends"), DIAGNOSE("Diagnose")
+    NOW("Now"), HEALTH("Health"), TRENDS("Trends"), DIAGNOSE("Diagnose")
 }
 
 @Composable
 private fun AppRoot(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsState()
-    var tab by rememberSaveable { mutableStateOf(Tab.HEALTH) }
+    var tab by rememberSaveable { mutableStateOf(Tab.NOW) }
 
     Scaffold(
         containerColor = Cell.Bg,
@@ -59,8 +60,9 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (tab) {
+                Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage)
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history)
-                Tab.TRENDS -> TrendsScreen(state.analysis, state.history)
+                Tab.TRENDS -> TrendsScreen(state.analysis, state.history, state.dailyUsage)
                 Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis)
             }
         }

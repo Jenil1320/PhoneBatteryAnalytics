@@ -14,12 +14,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 data class UiState(
     val loading: Boolean = true,
     val snapshot: BatterySnapshot? = null,
     val analysis: Analysis? = null,
     val history: List<HistoryPoint> = emptyList(),
+    val dailyUsage: List<Pair<String, Double>> = emptyList(),
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -35,19 +39,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
             val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
-            val history = try {
+            var history: List<HistoryPoint> = emptyList()
+            var usage: List<Pair<String, Double>> = emptyList()
+            try {
                 HistoryStore(getApplication()).use { store ->
                     val last = store.lastSampleMs()
                     // Record this reading unless we just stored one (avoid duplicates).
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
+                        // Attribute any drop since the last reading to today's usage.
+                        val prev = store.lastLevel()
+                        if (prev != null && snapshot.levelPct < prev) {
+                            store.addDischarge(dayKey(snapshot.timestampMs), (prev - snapshot.levelPct).toDouble())
+                        }
                         store.insert(snapshot, analysis)
                     }
-                    store.recent()
+                    history = store.recent()
+                    usage = store.dailyUsage(7)
                 }
             } catch (e: Exception) {
-                emptyList()  // history is best-effort; never let it crash the app
+                // history is best-effort; never let it crash the app
             }
-            _state.value = UiState(false, snapshot, analysis, history)
+            _state.value = UiState(false, snapshot, analysis, history, usage)
         }
     }
+
+    private fun dayKey(ms: Long): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(ms))
 }

@@ -141,6 +141,38 @@ object BatteryAnalytics {
         )
     }
 
+    /** Instantaneous power draw/charge in watts (magnitude), or null. */
+    fun powerWatts(voltageV: Float?, currentUa: Long?): Double? {
+        if (voltageV == null || currentUa == null) return null
+        return kotlin.math.abs(voltageV * (currentUa / 1_000_000.0))
+    }
+
+    enum class TempBand(val label: String) { COOL("Cool"), NORMAL("Normal"), WARM("Warm"), HOT("Hot"), UNKNOWN("—") }
+
+    /** Classify battery temperature into a comfort band. */
+    fun tempBand(c: Float?): TempBand = when {
+        c == null -> TempBand.UNKNOWN
+        c < 15f -> TempBand.COOL
+        c <= 35f -> TempBand.NORMAL
+        c <= 42f -> TempBand.WARM
+        else -> TempBand.HOT
+    }
+
+    /** Human label for how fast the battery is charging (only while charging). */
+    fun chargeRate(currentUa: Long?, status: String): String {
+        if (status != "Charging" || currentUa == null) return "—"
+        val mA = kotlin.math.abs(currentUa / 1000)
+        return when {
+            mA >= 2000 -> "Fast"
+            mA >= 1000 -> "Normal"
+            mA > 0 -> "Trickle"
+            else -> "—"
+        }
+    }
+
+    /** Equivalent full cycles represented by a day's discharged percentage points. */
+    fun equivalentCycles(dischargedPct: Double): Double = dischargedPct / 100.0
+
     /** Parse the fuel gauge's `cycle_counts` string into charge-level bands. */
     fun parseCycleCounts(raw: String?): List<Int>? {
         if (raw.isNullOrBlank()) return null

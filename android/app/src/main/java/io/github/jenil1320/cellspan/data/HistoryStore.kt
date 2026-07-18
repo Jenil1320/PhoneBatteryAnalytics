@@ -38,10 +38,11 @@ class HistoryStore(context: Context) :
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX idx_samples_ts ON samples(ts)")
+        db.execSQL(DAILY_USAGE_DDL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
-        // v1 only so far.
+        if (oldV < 2) db.execSQL(DAILY_USAGE_DDL)
     }
 
     fun insert(snapshot: BatterySnapshot, analysis: Analysis) {
@@ -86,8 +87,37 @@ class HistoryStore(context: Context) :
             if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
         }
 
+    /** Battery level of the most recent stored sample, or null if empty. */
+    fun lastLevel(): Int? =
+        readableDatabase.rawQuery("SELECT level FROM samples ORDER BY ts DESC LIMIT 1", null).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getInt(0) else null
+        }
+
+    /** Add discharged percentage points to a calendar day's running total. */
+    fun addDischarge(dayKey: String, pct: Double) {
+        if (pct <= 0.0) return
+        writableDatabase.apply {
+            execSQL("INSERT OR IGNORE INTO daily_usage(day, discharged) VALUES(?, 0)", arrayOf(dayKey))
+            execSQL("UPDATE daily_usage SET discharged = discharged + ? WHERE day = ?", arrayOf(pct, dayKey))
+        }
+    }
+
+    /** The last [days] calendar days of discharge totals (percentage points), oldest first. */
+    fun dailyUsage(days: Int = 7): List<Pair<String, Double>> {
+        val out = ArrayList<Pair<String, Double>>()
+        readableDatabase.rawQuery(
+            "SELECT day, discharged FROM (SELECT * FROM daily_usage ORDER BY day DESC LIMIT ?) ORDER BY day ASC",
+            arrayOf(days.toString())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0) to c.getDouble(1))
+        }
+        return out
+    }
+
     companion object {
         private const val DB_NAME = "cellspan.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
+        private const val DAILY_USAGE_DDL =
+            "CREATE TABLE IF NOT EXISTS daily_usage (day TEXT PRIMARY KEY, discharged REAL NOT NULL DEFAULT 0)"
     }
 }

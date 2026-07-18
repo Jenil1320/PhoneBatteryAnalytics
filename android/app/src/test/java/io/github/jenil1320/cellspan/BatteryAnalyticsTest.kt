@@ -129,6 +129,35 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun powerWatts_computesMagnitude() {
+        assertEquals(4.0, BatteryAnalytics.powerWatts(4.0f, 1_000_000)!!, 0.01)
+        assertEquals(5.925, BatteryAnalytics.powerWatts(3.95f, -1_500_000)!!, 0.01)
+        assertNull(BatteryAnalytics.powerWatts(null, 1_000_000))
+    }
+
+    @Test
+    fun tempBand_classifies() {
+        assertEquals(BatteryAnalytics.TempBand.COOL, BatteryAnalytics.tempBand(10f))
+        assertEquals(BatteryAnalytics.TempBand.NORMAL, BatteryAnalytics.tempBand(25f))
+        assertEquals(BatteryAnalytics.TempBand.WARM, BatteryAnalytics.tempBand(38f))
+        assertEquals(BatteryAnalytics.TempBand.HOT, BatteryAnalytics.tempBand(45f))
+        assertEquals(BatteryAnalytics.TempBand.UNKNOWN, BatteryAnalytics.tempBand(null))
+    }
+
+    @Test
+    fun chargeRate_onlyWhileCharging() {
+        assertEquals("Fast", BatteryAnalytics.chargeRate(2_500_000, "Charging"))
+        assertEquals("Normal", BatteryAnalytics.chargeRate(1_400_000, "Charging"))
+        assertEquals("Trickle", BatteryAnalytics.chargeRate(500_000, "Charging"))
+        assertEquals("—", BatteryAnalytics.chargeRate(-1_500_000, "Discharging"))
+    }
+
+    @Test
+    fun equivalentCycles_isPercentOver100() {
+        assertEquals(0.5, BatteryAnalytics.equivalentCycles(50.0), 0.0001)
+    }
+
+    @Test
     fun parseCycleCounts_readsBands() {
         val bands = BatteryAnalytics.parseCycleCounts("2867 8354 11070 11313 11102 10334 9503 8209 6563 3748")
         assertEquals(10, bands!!.size)
