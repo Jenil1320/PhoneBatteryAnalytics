@@ -35,14 +35,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
             val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
-            val store = HistoryStore(getApplication())
-            val last = store.lastSampleMs()
-            // Record this reading unless we just stored one (avoid duplicates).
-            if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
-                store.insert(snapshot, analysis)
+            val history = try {
+                HistoryStore(getApplication()).use { store ->
+                    val last = store.lastSampleMs()
+                    // Record this reading unless we just stored one (avoid duplicates).
+                    if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
+                        store.insert(snapshot, analysis)
+                    }
+                    store.recent()
+                }
+            } catch (e: Exception) {
+                emptyList()  // history is best-effort; never let it crash the app
             }
-            val history = store.recent()
-            store.close()
             _state.value = UiState(false, snapshot, analysis, history)
         }
     }

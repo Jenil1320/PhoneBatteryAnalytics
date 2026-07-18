@@ -26,6 +26,7 @@ object BatteryReader {
             val scale = sticky?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
             if (l >= 0 && scale > 0) l * 100 / scale
             else bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+                .takeIf { it in 0..100 } ?: 0
         }
 
         val statusStr = statusToString(sticky?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1)

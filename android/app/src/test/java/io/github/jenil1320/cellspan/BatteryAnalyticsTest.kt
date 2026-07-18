@@ -3,6 +3,7 @@ package io.github.jenil1320.cellspan
 import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
 import io.github.jenil1320.cellspan.analytics.Condition
 import io.github.jenil1320.cellspan.data.BatterySnapshot
+import io.github.jenil1320.cellspan.data.DeviceCapacityTable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -95,6 +96,36 @@ class BatteryAnalyticsTest {
         assertNull(a.designCapacityMah)
         assertNull(a.sohPct)
         assertEquals(Condition.UNKNOWN, a.condition)
+    }
+
+    @Test
+    fun soh_isCappedAt100ForFreshOrOvershootingCells() {
+        // 4,500,000 / 4,386,000 = 102.6% -> shown as 100%.
+        val a = BatteryAnalytics.analyze(
+            snapshot(chargeFull = 4_500_000, chargeFullDesign = 4_386_000, cycles = 40),
+            nowMs,
+        )
+        assertEquals(100.0, a.sohPct!!, 0.001)
+    }
+
+    @Test
+    fun soh_rejectsImplausibleData() {
+        // 9,000,000 / 4,386,000 = 205% -> treated as garbage, no SoH.
+        val a = BatteryAnalytics.analyze(
+            snapshot(chargeFull = 9_000_000, chargeFullDesign = 4_386_000),
+            nowMs,
+        )
+        assertNull(a.sohPct)
+    }
+
+    @Test
+    fun capacityTable_matchesRegionalSkuSuffixes() {
+        assertEquals(3900, DeviceCapacityTable.designCapacityMah("SM-S911B")) // S23 intl
+        assertEquals(3900, DeviceCapacityTable.designCapacityMah("SM-S911U")) // S23 US
+        assertEquals(5000, DeviceCapacityTable.designCapacityMah("SM-S918W")) // S23 Ultra CA
+        assertEquals(4355, DeviceCapacityTable.designCapacityMah("Pixel 7"))
+        assertNull(DeviceCapacityTable.designCapacityMah("Made Up Z9"))
+        assertNull(DeviceCapacityTable.designCapacityMah(null))
     }
 
     @Test

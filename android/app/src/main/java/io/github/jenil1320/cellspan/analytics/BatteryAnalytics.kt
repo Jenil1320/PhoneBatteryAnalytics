@@ -84,9 +84,13 @@ object BatteryAnalytics {
 
         val sohIsEstimated = !(s.chargeFullUah != null && s.chargeFullDesignUah != null)
         val soh: Double? =
-            if (currentMah != null && designMah != null && designMah > 0)
-                (currentMah.toDouble() / designMah * 100.0).coerceIn(0.0, 120.0)
-            else null
+            if (currentMah != null && designMah != null && designMah > 0) {
+                val raw = currentMah.toDouble() / designMah * 100.0
+                // A fresh cell can read slightly over its rated design capacity, and
+                // the estimate path can overshoot; a health figure over 100% reads as
+                // a bug. Cap the surfaced value at 100, but reject clearly bad data.
+                if (raw in 0.0..130.0) raw.coerceAtMost(100.0) else null
+            } else null
 
         val condition = conditionFor(soh, s.cycleCount)
 

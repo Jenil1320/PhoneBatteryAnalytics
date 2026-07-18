@@ -58,9 +58,23 @@ fun conditionColor(c: Condition) = when (c) {
     Condition.UNKNOWN -> Cell.TextMuted
 }
 
+/**
+ * Build (x, y) chart points, normalising x to *days since the first sample* so
+ * the millisecond timestamps don't overflow Float's precision (a Float can't
+ * distinguish two epoch-ms values only minutes apart).
+ */
+private fun chartPoints(
+    history: List<HistoryPoint>,
+    selector: (HistoryPoint) -> Double?,
+): List<Pair<Float, Float>> {
+    val raw = history.mapNotNull { hp -> selector(hp)?.let { hp.timestampMs to it } }
+    if (raw.isEmpty()) return emptyList()
+    val t0 = raw.first().first
+    return raw.map { (ts, v) -> ((ts - t0) / 86_400_000.0).toFloat() to v.toFloat() }
+}
+
 private fun sohPoints(history: List<HistoryPoint>): List<Pair<Float, Float>> =
-    history.filter { it.sohPct != null }
-        .map { it.timestampMs.toFloat() to it.sohPct!!.toFloat() }
+    chartPoints(history) { it.sohPct }
 
 // ── Health ───────────────────────────────────────────────────────────────────
 @Composable
@@ -188,8 +202,7 @@ fun TrendsScreen(analysis: Analysis?, history: List<HistoryPoint>) {
             }
         }
 
-        val cyclePts = history.filter { it.cycleCount != null }
-            .map { it.timestampMs.toFloat() to it.cycleCount!!.toFloat() }
+        val cyclePts = chartPoints(history) { it.cycleCount?.toDouble() }
         if (cyclePts.size >= 2) {
             Spacer(Modifier.height(20.dp))
             SurfaceCard {

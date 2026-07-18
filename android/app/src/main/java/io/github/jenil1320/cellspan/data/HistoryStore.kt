@@ -58,9 +58,10 @@ class HistoryStore(context: Context) :
 
     fun recent(limit: Int = 500): List<HistoryPoint> {
         val out = ArrayList<HistoryPoint>()
+        // Take the NEWEST `limit` rows, then present them oldest-first for charting.
         readableDatabase.rawQuery(
-            "SELECT ts, soh, cycles, capacity_mah, level, temp_c " +
-                "FROM samples ORDER BY ts ASC LIMIT ?",
+            "SELECT ts, soh, cycles, capacity_mah, level, temp_c FROM " +
+                "(SELECT * FROM samples ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC",
             arrayOf(limit.toString())
         ).use { c ->
             while (c.moveToNext()) {
