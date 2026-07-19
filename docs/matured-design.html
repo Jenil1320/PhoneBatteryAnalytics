@@ -19,29 +19,27 @@
   body{background:radial-gradient(120% 80% at 50% -10%,#12160f,#0a0c0a 60%);color:var(--tp);
     font-family:'Space Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased;
     padding:40px 28px 80px;min-height:100vh}
-  .mono{font-family:'IBM Plex Mono',monospace}
+  .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
   header{max-width:1200px;margin:0 auto 8px}
   .kicker{font:600 11px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;color:var(--g);text-transform:uppercase}
-  h1{font-size:30px;font-weight:600;letter-spacing:-.02em;margin:10px 0 6px}
-  .sub{color:var(--tm);font-size:14px;max-width:640px;line-height:1.55}
-  .rail{display:flex;gap:34px;overflow-x:auto;padding:34px 4px 10px;max-width:1200px;margin:0 auto;
-    scrollbar-width:thin}
+  h1{font-size:30px;font-weight:600;letter-spacing:-.02em;margin:10px 0 6px;text-wrap:balance}
+  .sub{color:var(--tm);font-size:14px;max-width:660px;line-height:1.55}
+  .rail{display:flex;gap:34px;overflow-x:auto;padding:34px 4px 10px;max-width:1300px;margin:0 auto}
   .col{flex:none;width:330px}
   .cap{display:flex;gap:9px;align-items:baseline;margin-bottom:14px;min-height:52px}
   .cid{font:600 10px 'IBM Plex Mono',monospace;background:rgba(134,189,122,.14);color:var(--g);
     padding:3px 7px;border-radius:5px;letter-spacing:.04em}
   .ct{font-size:14px;font-weight:600}
   .cd{font-size:12px;color:var(--tm);line-height:1.45;margin-top:2px}
-  /* phone */
   .ph{width:330px;height:700px;border-radius:42px;padding:7px;
     background:linear-gradient(150deg,#050705,#141613);
     box-shadow:0 40px 80px -34px rgba(0,0,0,.7),inset 0 0 0 1.4px rgba(255,255,255,.06)}
   .scr{position:relative;width:100%;height:100%;background:var(--bg);border-radius:36px;overflow:hidden;
     display:flex;flex-direction:column}
-  .stbar{display:flex;justify-content:space-between;padding:13px 22px 0;font:500 12px 'IBM Plex Mono';color:var(--stat)}
+  .stbar{display:flex;justify-content:space-between;padding:13px 22px 0;font:500 11px 'IBM Plex Mono';color:var(--stat)}
   .body{padding:14px 20px 64px;overflow:hidden;flex:1}
-  .nav{position:absolute;bottom:0;left:0;right:0;height:60px;display:flex;justify-content:space-around;
-    align-items:flex-start;padding:12px 22px 0;background:linear-gradient(0deg,var(--bg),transparent);
+  .nav{position:absolute;bottom:0;left:0;right:0;height:58px;display:flex;justify-content:space-around;
+    align-items:flex-start;padding:11px 18px 0;background:linear-gradient(0deg,var(--bg),transparent);
     border-top:1px solid var(--line)}
   .ni{display:flex;flex-direction:column;align-items:center;gap:6px;font:500 9.5px 'Space Grotesk';color:var(--tf)}
   .ni.on{color:var(--g)}
@@ -51,22 +49,28 @@
   .card{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:13px 14px;margin-top:11px}
   .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:100px;font-size:11.5px;font-weight:500}
   .pill.g{background:rgba(134,189,122,.13);border:1px solid rgba(134,189,122,.3);color:var(--gbright)}
-  .pill.n{background:rgba(255,255,255,.05);border:1px solid var(--line2);color:var(--tm)}
+  .chip{font:600 9px 'IBM Plex Mono';letter-spacing:.05em;padding:3px 7px;border-radius:5px}
+  .chip.dn{background:rgba(211,112,92,.15);color:#e39a8b}
+  .chip.up{background:rgba(134,189,122,.15);color:var(--gbright)}
   .note{font-size:11px;color:var(--tf);line-height:1.5}
-  .foot{max-width:1200px;margin:36px auto 0;color:var(--tm);font-size:13px;line-height:1.7}
-  .foot b{color:var(--g2);font-weight:600}
   .tri{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px}
-  .tri>div{padding:0 2px}
   .big{font-size:15px;font-weight:500}
   .row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
   .row:last-child{border-bottom:none}
+  .seg{display:inline-flex;background:var(--surf);border:1px solid var(--line);border-radius:9px;overflow:hidden;font:500 10px 'IBM Plex Mono'}
+  .seg span{padding:5px 10px;color:var(--tm)}
+  .seg span.on{background:rgba(134,189,122,.16);color:var(--gbright)}
+  .tcard{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:11px 13px 8px;margin-top:10px}
+  .thead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .foot{max-width:1200px;margin:36px auto 0;color:var(--tm);font-size:13px;line-height:1.7}
+  .foot b{color:var(--g2);font-weight:600}
 </style>
 </head>
 <body>
 <header>
   <div class="kicker">Cellspan · design direction v2</div>
   <h1>Matured, AccuBattery-class — in the Cellspan green</h1>
-  <p class="sub">Four screens that lift Cellspan to reference-app density: a three-source State of Health (measured · modeled · gauge), a physics-based degradation breakdown adapted from the simSES aging model, real-time endurance estimates, and full charge/discharge session logs.</p>
+  <p class="sub">Five screens at reference-app density: a three-source State of Health (measured · modeled · gauge), a physics-based degradation breakdown adapted from the simSES aging model, per-parameter trends with day/week/month views, live endurance, and session history.</p>
 </header>
 
 <div class="rail">
@@ -75,7 +79,7 @@
   <div class="col">
     <div class="cap"><span class="cid">2a</span><div><div class="ct">Health — three sources, one number</div><div class="cd">Measured (charge sessions), modeled (degradation physics) and the raw gauge, cross-checked. Capacity scatter with a regression trend and forecast.</div></div></div>
     <div class="ph"><div class="scr">
-      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 83</span></div>
+      <div class="stbar"><span>9:41</span><span>LTE · 83%</span></div>
       <div class="body">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <span class="lbl">State of Health</span><span class="mono" style="font-size:11px;color:var(--tf)">Pixel 7 · 3y 8m</span>
@@ -83,17 +87,13 @@
         <div style="display:flex;align-items:flex-start;margin-top:14px">
           <span style="font-size:88px;line-height:.82;font-weight:600;letter-spacing:-.03em">83</span>
           <span style="font-size:26px;color:var(--tm);margin-top:6px">%</span>
-          <div style="margin:6px 0 0 14px">
-            <span class="pill g"><span class="dot"></span>Aging — healthy</span>
-          </div>
+          <div style="margin:6px 0 0 14px"><span class="pill g"><span class="dot"></span>Aging — healthy</span></div>
         </div>
-        <!-- three sources -->
         <div class="card" style="display:flex;gap:6px;padding:11px 12px">
           <div style="flex:1"><div class="lbl">Measured</div><div class="mono big" style="color:var(--gbright)">83%</div><div class="note">5 sessions</div></div>
           <div style="flex:1;border-left:1px solid var(--line);padding-left:10px"><div class="lbl">Modeled</div><div class="mono big" style="color:var(--cool)">82%</div><div class="note">simSES</div></div>
           <div style="flex:1;border-left:1px solid var(--line);padding-left:10px"><div class="lbl">Gauge</div><div class="mono big">83%</div><div class="note">fuel IC</div></div>
         </div>
-        <!-- scatter + regression -->
         <div class="lbl" style="margin:14px 0 8px">Capacity over time · mAh</div>
         <svg width="290" height="118" viewBox="0 0 290 118" style="overflow:visible">
           <line x1="0" y1="8" x2="290" y2="8" stroke="rgba(255,255,255,.05)"/>
@@ -101,7 +101,6 @@
           <text x="0" y="4" class="mono" fill="#636a5d" font-size="8">4355</text>
           <text x="0" y="114" class="mono" fill="#636a5d" font-size="8">80%</text>
           <line x1="0" y1="98" x2="290" y2="98" stroke="rgba(211,112,92,.5)" stroke-dasharray="3 4"/>
-          <!-- session dots -->
           <g fill="#86bd7a">
             <circle cx="10" cy="20" r="2.4"/><circle cx="35" cy="24" r="2.4"/><circle cx="55" cy="22" r="2.4"/>
             <circle cx="80" cy="34" r="2.4"/><circle cx="105" cy="40" r="2.4"/><circle cx="128" cy="46" r="2.4"/>
@@ -109,7 +108,6 @@
             <circle cx="220" cy="72" r="2.4"/><circle cx="244" cy="78" r="2.4"/><circle cx="268" cy="82" r="3.4"/>
           </g>
           <g fill="#636a5d" opacity=".55"><circle cx="60" cy="14" r="1.8"/><circle cx="140" cy="66" r="1.8"/><circle cx="210" cy="60" r="1.8"/></g>
-          <!-- regression -->
           <path d="M6,18 L284,86" stroke="#8ec47e" stroke-width="2" stroke-linecap="round"/>
           <path d="M284,86 L330,98" stroke="#636a5d" stroke-width="1.6" stroke-dasharray="3 4"/>
           <circle cx="268" cy="82" r="5.5" fill="rgba(134,189,122,.2)"/>
@@ -120,7 +118,7 @@
           <div><div class="mono big">0.86</div><div class="lbl">R²</div></div>
         </div>
       </div>
-      <div class="nav"><div class="ni on"><span class="dot"></span>Health</div><div class="ni"><span class="dot o"></span>Now</div><div class="ni"><span class="dot o"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Now</div><div class="ni on"><span class="dot"></span>Health</div><div class="ni"><span class="dot o"></span>Trends</div><div class="ni"><span class="dot o"></span>History</div></div>
     </div></div>
   </div>
 
@@ -128,11 +126,10 @@
   <div class="col">
     <div class="cap"><span class="cid">2b</span><div><div class="ct">Why it aged — the simSES model</div><div class="cd">Splits fade into calendar vs cyclic aging using the phone's own logged temperature/charge-level exposure and cycle distribution.</div></div></div>
     <div class="ph"><div class="scr">
-      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 83</span></div>
+      <div class="stbar"><span>9:41</span><span>LTE · 83%</span></div>
       <div class="body">
         <span class="lbl">Degradation model</span>
         <p style="font-size:13.5px;color:var(--ts);line-height:1.5;margin-top:10px">Your battery has lost about <b style="color:var(--tp)">17%</b> of its original capacity. Here's where it came from.</p>
-        <!-- split bar -->
         <div style="margin-top:16px">
           <div style="display:flex;height:26px;border-radius:8px;overflow:hidden">
             <div style="width:53%;background:linear-gradient(90deg,#5f9a52,#8ec47e);display:flex;align-items:center;justify-content:center;font:600 11px 'IBM Plex Mono';color:#0b1408">9% cal</div>
@@ -154,7 +151,7 @@
         </div>
         <p class="note" style="margin-top:11px">Semi-empirical model (calendar √t·Arrhenius·SoC-stress + cyclic DoD·throughput), adapted from the simSES storage-degradation approach.</p>
       </div>
-      <div class="nav"><div class="ni"><span class="dot o"></span>Health</div><div class="ni on"><span class="dot"></span>Model</div><div class="ni"><span class="dot o"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Now</div><div class="ni on"><span class="dot"></span>Health</div><div class="ni"><span class="dot o"></span>Trends</div><div class="ni"><span class="dot o"></span>History</div></div>
     </div></div>
   </div>
 
@@ -162,10 +159,9 @@
   <div class="col">
     <div class="cap"><span class="cid">2c</span><div><div class="ct">Now — endurance &amp; live stats</div><div class="cd">"Lasts for" at light / normal / heavy use, live current, average drain, temperature, voltage — with the wobbling charge orb.</div></div></div>
     <div class="ph"><div class="scr">
-      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 64</span></div>
+      <div class="stbar"><span>9:41</span><span>LTE · 64%</span></div>
       <div class="body">
         <div style="display:flex;justify-content:space-between"><span class="lbl">Right now</span><span class="mono" style="font-size:11px;color:var(--tf)">Discharging</span></div>
-        <!-- orb -->
         <div style="display:flex;justify-content:center;margin-top:12px">
           <div style="position:relative;width:150px;height:150px;border-radius:50%;overflow:hidden;background:#101310;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.06)">
             <div style="position:absolute;left:0;right:0;bottom:0;height:64%;background:linear-gradient(0deg,#4f8a45,#8ec47e)"></div>
@@ -176,9 +172,9 @@
         </div>
         <div class="lbl" style="margin:16px 0 8px">Lasts for</div>
         <div class="card" style="padding:11px 13px">
-          <div class="row"><span style="font-size:12.5px">☾ Light use</span><span class="mono" style="font-size:13px;color:var(--gbright)">31 h 40 m</span></div>
-          <div class="row"><span style="font-size:12.5px">◐ Normal use</span><span class="mono" style="font-size:13px">12 h 10 m</span></div>
-          <div class="row"><span style="font-size:12.5px">◉ Heavy use</span><span class="mono" style="font-size:13px;color:var(--warn)">4 h 55 m</span></div>
+          <div class="row"><span style="font-size:12.5px">Light use</span><span class="mono" style="font-size:13px;color:var(--gbright)">31 h 40 m</span></div>
+          <div class="row"><span style="font-size:12.5px">Normal use</span><span class="mono" style="font-size:13px">12 h 10 m</span></div>
+          <div class="row"><span style="font-size:12.5px">Heavy use</span><span class="mono" style="font-size:13px;color:var(--warn)">4 h 55 m</span></div>
         </div>
         <div class="tri" style="margin-top:13px">
           <div><div class="mono big" style="color:var(--bad)">-524 mA</div><div class="lbl">current</div></div>
@@ -190,27 +186,71 @@
           <div style="text-align:right"><div class="lbl">Since unplugged</div><div class="mono big">-1,139 mAh</div></div>
         </div>
       </div>
-      <div class="nav"><div class="ni"><span class="dot o"></span>Health</div><div class="ni on"><span class="dot"></span>Now</div><div class="ni"><span class="dot o"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+      <div class="nav"><div class="ni on"><span class="dot"></span>Now</div><div class="ni"><span class="dot o"></span>Health</div><div class="ni"><span class="dot o"></span>Trends</div><div class="ni"><span class="dot o"></span>History</div></div>
     </div></div>
   </div>
 
-  <!-- 2d History / sessions -->
+  <!-- 2d Trends -->
   <div class="col">
-    <div class="cap"><span class="cid">2d</span><div><div class="ct">History — session logs</div><div class="cd">Every charge and discharge as a card: time-stamped range, screen-on time, wear in cycles, efficiency dots — plus estimated per-app drain.</div></div></div>
+    <div class="cap"><span class="cid">2d</span><div><div class="ct">Trends — cycles · temp · voltage · current</div><div class="cd">Each parameter over time with a day / week / month toggle. Endpoint emphasized, faint grid, tap a chart for its own detail.</div></div></div>
     <div class="ph"><div class="scr">
-      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 64</span></div>
+      <div class="stbar"><span>9:41</span><span>LTE · 64%</span></div>
+      <div class="body">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="lbl">Trends</span>
+          <span class="seg"><span>Day</span><span class="on">Week</span><span>Month</span></span>
+        </div>
+
+        <div class="tcard">
+          <div class="thead"><span style="font-size:12.5px;font-weight:500">Charge cycles</span><span class="mono" style="font-size:12px">797 <span class="chip up">+4</span></span></div>
+          <svg width="278" height="46" viewBox="0 0 278 46"><line x1="0" y1="45" x2="278" y2="45" stroke="rgba(255,255,255,.06)"/>
+            <path d="M2,40 H40 V37 H90 V33 H150 V28 H210 V24 H276" fill="none" stroke="#86bd7a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="276" cy="24" r="3" fill="#86bd7a"/></svg>
+        </div>
+
+        <div class="tcard">
+          <div class="thead"><span style="font-size:12.5px;font-weight:500">Temperature</span><span class="mono" style="font-size:12px">avg 29° · peak 34°</span></div>
+          <svg width="278" height="46" viewBox="0 0 278 46"><line x1="0" y1="8" x2="278" y2="8" stroke="rgba(255,255,255,.05)"/><line x1="0" y1="40" x2="278" y2="40" stroke="rgba(255,255,255,.05)"/>
+            <path d="M2,30 C40,18 70,34 110,26 S180,10 210,22 250,34 276,20" fill="none" stroke="#6fb6cc" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="276" cy="20" r="3" fill="#6fb6cc"/></svg>
+        </div>
+
+        <div class="tcard">
+          <div class="thead"><span style="font-size:12.5px;font-weight:500">Voltage</span><span class="mono" style="font-size:12px">3.68 – 4.35 V</span></div>
+          <svg width="278" height="46" viewBox="0 0 278 46"><line x1="0" y1="40" x2="278" y2="40" stroke="rgba(255,255,255,.05)"/>
+            <path d="M2,34 C30,14 55,12 80,30 S130,40 160,18 210,10 240,30 276,26" fill="none" stroke="#8ec47e" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="276" cy="26" r="3" fill="#8ec47e"/></svg>
+        </div>
+
+        <div class="tcard">
+          <div class="thead"><span style="font-size:12.5px;font-weight:500">Current</span><span class="mono" style="font-size:12px">+1.4 / −0.6 A</span></div>
+          <svg width="278" height="46" viewBox="0 0 278 46"><line x1="0" y1="23" x2="278" y2="23" stroke="rgba(211,112,92,.4)" stroke-dasharray="3 4"/>
+            <path d="M2,30 L40,10 L80,12 L120,34 L160,36 L200,16 L240,32 L276,22" fill="none" stroke="#a6d89a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="276" cy="22" r="3" fill="#a6d89a"/></svg>
+          <div class="note" style="margin-top:5px">Above the line = charging, below = draw.</div>
+        </div>
+      </div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Now</div><div class="ni"><span class="dot o"></span>Health</div><div class="ni on"><span class="dot"></span>Trends</div><div class="ni"><span class="dot o"></span>History</div></div>
+    </div></div>
+  </div>
+
+  <!-- 2e History / sessions -->
+  <div class="col">
+    <div class="cap"><span class="cid">2e</span><div><div class="ct">History — session logs</div><div class="cd">Every charge and discharge as a card: time-stamped range, screen-on time, wear in cycles, efficiency dots. Direction shown by a chip, not an accent rail.</div></div></div>
+    <div class="ph"><div class="scr">
+      <div class="stbar"><span>9:41</span><span>LTE · 64%</span></div>
       <div class="body">
         <span class="lbl">Sessions · today</span>
-        <div class="card" style="border-left:2px solid var(--bad)">
-          <div style="display:flex;justify-content:space-between"><span style="font-size:12.5px;font-weight:500">Discharge · 8h 31m</span><span class="mono" style="font-size:10px;color:var(--tf)">16:34</span></div>
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px"><span class="mono" style="font-size:19px">70→28%</span><span class="mono" style="font-size:12px;color:var(--bad)">-1,878 mAh</span></div>
-          <div style="height:5px;border-radius:3px;margin-top:8px;background:linear-gradient(90deg,#d3705c 60%,#3a2420 60%)"></div>
-          <div class="note" style="margin-top:6px">Screen on 2h 33m · -42%</div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12.5px;font-weight:500">Discharge · 8h 31m</span><span class="chip dn">70→28%</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px"><span class="mono" style="font-size:19px">-42%</span><span class="mono" style="font-size:12px;color:var(--bad)">-1,878 mAh</span></div>
+          <div style="height:5px;border-radius:3px;margin-top:8px;background:linear-gradient(90deg,#d3705c 60%,#2a201d 60%)"></div>
+          <div class="note" style="margin-top:6px">Screen on 2h 33m · 16:34</div>
         </div>
-        <div class="card" style="border-left:2px solid var(--g)">
-          <div style="display:flex;justify-content:space-between"><span style="font-size:12.5px;font-weight:500">Charge · 1h 07m</span><span class="mono" style="font-size:10px;color:var(--tf)">15:04</span></div>
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px"><span class="mono" style="font-size:19px">40→62%</span><span class="mono" style="font-size:12px;color:var(--g)">+22% · +990 mAh</span></div>
-          <div style="display:flex;justify-content:space-between;margin-top:7px"><span class="note">Wear 0.02 cyc · Eff 88%</span><span style="letter-spacing:1px;color:var(--g);font-size:9px">●●●●●</span></div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12.5px;font-weight:500">Charge · 1h 07m</span><span class="chip up">40→62%</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px"><span class="mono" style="font-size:19px">+22%</span><span class="mono" style="font-size:12px;color:var(--g)">+990 mAh</span></div>
+          <div style="display:flex;justify-content:space-between;margin-top:8px"><span class="note">Wear 0.02 cyc · Eff 88% · 15:04</span><span style="letter-spacing:1px;color:var(--g);font-size:9px">●●●●●</span></div>
         </div>
         <div class="lbl" style="margin:14px 0 8px">Estimated app drain · today</div>
         <div style="display:flex;flex-direction:column;gap:7px">
@@ -218,18 +258,18 @@
           <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;font-size:11px">X</span><span style="flex:1;height:9px;border-radius:4px;background:#1e241a;overflow:hidden"><span style="display:block;height:100%;width:52%;background:var(--g)"></span></span><span class="mono" style="font-size:10px;color:var(--tm)">148 mAh</span></div>
           <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;font-size:11px">Chrome</span><span style="flex:1;height:9px;border-radius:4px;background:#1e241a;overflow:hidden"><span style="display:block;height:100%;width:30%;background:var(--g)"></span></span><span class="mono" style="font-size:10px;color:var(--tm)">86 mAh</span></div>
         </div>
-        <p class="note" style="margin-top:10px">Estimate = screen-on drain shared by foreground time. Exact per-app mAh needs the desktop tool.</p>
+        <p class="note" style="margin-top:10px">Estimate = screen-on drain shared by foreground time. Exact per-app mAh lives in the desktop tool.</p>
       </div>
-      <div class="nav"><div class="ni"><span class="dot o"></span>Health</div><div class="ni"><span class="dot o"></span>Now</div><div class="ni on"><span class="dot"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Now</div><div class="ni"><span class="dot o"></span>Health</div><div class="ni"><span class="dot o"></span>Trends</div><div class="ni on"><span class="dot"></span>History</div></div>
     </div></div>
   </div>
 
 </div>
 
 <div class="foot">
-  <p><b>What's new vs today's app:</b> a three-source SoH that shows measured / modeled / gauge side by side for confidence; a <b>degradation-model screen</b> that explains the fade as calendar vs cyclic aging from the phone's own logged temperature and charge exposure; real <b>endurance estimates</b> ("lasts for" at three usage levels); and full <b>session logs</b> with efficiency and estimated per-app drain.</p>
-  <p style="margin-top:10px"><b>The simSES angle:</b> the modeled SoH runs a semi-empirical aging model — calendar fade scaling with √time, an Arrhenius temperature factor and a charge-level stress factor, plus cyclic fade from depth-of-discharge and cycle throughput — parameterised by the exposure data the Pixel already records (<span class="mono">swelling_data</span> = hours at each temperature/charge level, and the cycle-count distribution). It's the household-storage degradation approach, pointed at a phone cell.</p>
-  <p style="margin-top:10px"><b>Build order:</b> this mockup → Compose implementation of Health (2a) + model (2b) → Now/endurance (2c) → History/sessions (2d). Nav shown as Health · Now · History · Apps; the current Analytics/Drains content folds into History and Apps.</p>
+  <p><b>Changes in this pass:</b> removed the coloured left-edge rails on cards (a cleaner card carries the charge/discharge state with a chip and coloured value instead), and added the <b>Trends</b> screen — cycles, temperature, voltage and current, each over time with a day / week / month toggle, faint grid and an emphasised endpoint.</p>
+  <p style="margin-top:10px"><b>The simSES angle:</b> the modeled SoH runs a semi-empirical aging model — calendar fade scaling with √time, an Arrhenius temperature factor and a charge-level stress factor, plus cyclic fade from depth-of-discharge and cycle throughput — parameterised by the exposure data the Pixel already records (<span class="mono">swelling_data</span> = hours at each temperature/charge level, and the cycle-count distribution). The household-storage degradation approach, pointed at a phone cell.</p>
+  <p style="margin-top:10px"><b>Nav:</b> Now · Health · Trends · History (four tabs); the degradation model opens from the Health screen, and estimated app drain sits under History. <b>Build order:</b> Health (2a) + model (2b) → Trends (2d) → Now/endurance (2c) → History/sessions (2e).</p>
 </div>
 </body>
 </html>
