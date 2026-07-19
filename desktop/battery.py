@@ -813,6 +813,24 @@ def _fmt_pct(p: float) -> str:
     return "<0.1%"
 
 
+def _power_group(items, total, title):
+    items = sorted(items, key=lambda r: r["mah"], reverse=True)[:10]
+    if not items:
+        return ""
+    peak = max((r["mah"] / total * 100 for r in items), default=1) or 1
+    bars = "".join(
+        _power_bar(
+            r.get("display", r["name"]),
+            (r["mah"] / total * 100) / peak,
+            _fmt_pct(r["mah"] / total * 100),
+            "var(--accent)" if r.get("kind") == "app" else "var(--muted)",
+        )
+        for r in items
+    )
+    return (f'<div class="mono" style="font-size:10px;letter-spacing:.08em;'
+            f'color:var(--muted);text-transform:uppercase;margin:6px 0 8px">{title}</div>{bars}')
+
+
 def render_power_use() -> str:
     if not POWER_PATH.exists():
         return ""
@@ -823,32 +841,23 @@ def render_power_use() -> str:
     rows = [r for r in (data.get("rows") or []) if r.get("mah", 0) > 0]
     if not rows:
         return ""
-    # Total drain = sum of the subsystem component totals (screen/cpu/wifi/…);
-    # the UID rows are an attribution of that same drain to who used it.
-    total = sum(r["mah"] for r in rows if not str(r["name"]).upper().startswith("UID"))
-    if total <= 0:
-        total = sum(r["mah"] for r in rows) or 1
-    rows.sort(key=lambda r: r["mah"], reverse=True)
-    rows = rows[:15]
-    peak_pct = max((r["mah"] / total * 100 for r in rows), default=1) or 1
-    bars = "".join(
-        _power_bar(
-            r.get("display", r["name"]),
-            (r["mah"] / total * 100) / peak_pct,
-            _fmt_pct(r["mah"] / total * 100),
-            "var(--accent)" if r.get("kind") == "app" else "var(--muted)",
-        )
-        for r in rows
-    )
+    comps = [r for r in rows if not str(r["name"]).upper().startswith("UID")]
+    apps = [r for r in rows if str(r["name"]).upper().startswith("UID")]
+    # Total drain = sum of the subsystem totals (screen/cpu/wifi/…). App rows are
+    # an attribution of that same drain, so they're shown as their share of it.
+    total = sum(r["mah"] for r in comps) or (sum(r["mah"] for r in rows) or 1)
     ts = html.escape(str(data.get("ts", "")))
-    tiny = "  Very little has discharged since the last full charge — use the phone on battery a while, then re-run for a fuller picture." if total < 30 else ""
+    tiny = ("  Very little has discharged since the last full charge — use the phone "
+            "on battery a while, then re-run for a fuller picture.") if total < 30 else ""
     return (
         '<section class="panel"><h2>Where your battery goes</h2>'
-        '<div class="note" style="margin:0 0 12px">Share of the battery drain since '
-        'the last full charge, per app and per subsystem, from '
-        f'<code>dumpsys batterystats</code> (total ≈ {total:.0f} mAh). '
-        f'Green = app, grey = system. Captured {ts}.{tiny}</div>'
-        f'{bars}</section>'
+        '<div class="note" style="margin:0 0 14px">Share of battery drain since the '
+        'last full charge, from <code>dumpsys batterystats</code> '
+        f'(total ≈ {total:.0f} mAh). Captured {ts}.{tiny}</div>'
+        + _power_group(comps, total, "By subsystem")
+        + ('<div style="height:14px"></div>' if apps else "")
+        + _power_group(apps, total, "By app &amp; process")
+        + '</section>'
     )
 
 

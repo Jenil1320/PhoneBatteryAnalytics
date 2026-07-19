@@ -30,9 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.jenil1320.cellspan.ui.AnalyticsScreen
 import io.github.jenil1320.cellspan.ui.DiagnoseScreen
@@ -60,11 +63,16 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.NOW) }
 
-    // Live pulse: refresh vitals + the SoC log while the app is open.
+    // Live pulse: refresh vitals + the SoC log ONLY while the app is foreground
+    // (repeatOnLifecycle cancels the loop when backgrounded, so it never polls
+    // in the background), and at a gentler 60s cadence to keep its own drain low.
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
-        while (true) {
-            delay(20_000)
-            vm.tick()
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(60_000)
+                vm.tick()
+            }
         }
     }
 
