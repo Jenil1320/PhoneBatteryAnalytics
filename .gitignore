@@ -28,3 +28,7 @@ keystore.properties
 .idea/
 .DS_Store
 *.log
+
+# Raw batterystats dumps (personal)
+desktop/bstats.txt
+desktop/*.txt
