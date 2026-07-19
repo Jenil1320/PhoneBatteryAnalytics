@@ -82,6 +82,7 @@ py battery.py show               # print a live reading (does not store anything
 py battery.py collect            # read the phone and store one sample
 py battery.py collect --report   # store a sample AND rebuild dashboard.html
 py battery.py report --open      # rebuild the dashboard and open it in a browser
+py battery.py power              # per-app / per-subsystem battery use (dumpsys batterystats)
 ```
 
 Or just double-click:

@@ -1,7 +1,8 @@
 # ── Personal / generated data ────────────────────────────────
-# These contain device + battery serial numbers — never publish.
+# These contain device + battery serial numbers / app usage — never publish.
 desktop/battery_history.db
 desktop/dashboard.html
+desktop/power_use.json
 
 # ── Python ───────────────────────────────────────────────────
 __pycache__/

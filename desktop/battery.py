@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -37,6 +39,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DB_PATH = HERE / "battery_history.db"
 DASHBOARD_PATH = HERE / "dashboard.html"
+POWER_PATH = HERE / "power_use.json"   # latest per-app power breakdown (personal)
+
+# Well-known system UIDs for labelling batterystats consumers.
+SYSTEM_UIDS = {
+    0: "root", 1000: "Android system", 1001: "Telephony", 1002: "Bluetooth",
+    1013: "Media server", 1036: "logd", 2000: "adb shell", 9999: "nobody",
+}
 
 # Google's Pixel 7 replacement guidance: below 80% capacity OR 800 cycles.
 REPLACE_SOH_PCT = 80.0
@@ -692,6 +701,104 @@ def render_chart(rows, value_key: str, title: str, unit: str,
 # Dashboard
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Per-app battery attribution (dumpsys batterystats)
+# --------------------------------------------------------------------------- #
+
+def parse_power_use(dump: str):
+    """Extract the 'Estimated power use (mAh)' section: (capacity, [{name, mah}])."""
+    lines = dump.splitlines()
+    idx = next((i for i, l in enumerate(lines) if "Estimated power use (mAh)" in l), None)
+    if idx is None:
+        return None, None
+    capacity = None
+    rows = []
+    for l in lines[idx + 1:]:
+        if not l.strip():
+            break
+        if not (l.startswith(" ") or l.startswith("\t")):
+            break
+        s = l.strip()
+        mcap = re.search(r"Capacity:\s*([\d.]+)", s)
+        if mcap and not s.startswith("Uid"):
+            capacity = float(mcap.group(1))
+            continue
+        if s.startswith(("Computed drain", "actual drain")):
+            continue
+        m = re.match(r"([A-Za-z][\w /.():-]*?):\s*([\d.]+)", s)
+        if m:
+            rows.append({"name": m.group(1).strip(), "mah": float(m.group(2))})
+    return capacity, rows
+
+
+def uid_package_map(serial: str) -> dict:
+    m: dict[int, str] = {}
+    try:
+        out = adb("shell", "pm", "list", "packages", "-U", serial=serial, timeout=30)
+    except Exception:
+        return m
+    for l in out.splitlines():
+        pm = re.match(r"package:(\S+)\s+uid:(\d+)", l.strip())
+        if pm:
+            m.setdefault(int(pm.group(2)), pm.group(1))
+    return m
+
+
+def resolve_name(name: str, uidmap: dict) -> str:
+    m = re.match(r"Uid\s+u(\d+)a(\d+)", name)
+    if m:
+        uid = int(m.group(1)) * 100000 + 10000 + int(m.group(2))
+        return uidmap.get(uid, name)
+    m2 = re.match(r"Uid\s+(\d+)", name)
+    if m2:
+        uid = int(m2.group(1))
+        return uidmap.get(uid, SYSTEM_UIDS.get(uid, f"uid {uid}"))
+    return name
+
+
+def _power_bar(label: str, frac: float, val: float, color: str) -> str:
+    w = max(1, min(100, int(frac * 100)))
+    return (
+        '<div style="display:flex;align-items:center;gap:12px;margin:5px 0">'
+        f'<span class="mono" style="width:190px;font-size:11px;color:var(--muted);'
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        f'{html.escape(label)}</span>'
+        '<span style="flex:1;height:15px;background:var(--grid);border-radius:5px;overflow:hidden">'
+        f'<span style="display:block;height:100%;width:{w}%;background:{color};border-radius:5px"></span></span>'
+        f'<span class="mono" style="width:66px;text-align:right;font-size:11px;color:var(--muted)">'
+        f'{val:.0f} mAh</span></div>'
+    )
+
+
+def render_power_use() -> str:
+    if not POWER_PATH.exists():
+        return ""
+    try:
+        data = json.loads(POWER_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    rows = [r for r in (data.get("rows") or []) if r.get("mah", 0) > 0]
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: r["mah"], reverse=True)
+    rows = rows[:15]
+    peak = max((r["mah"] for r in rows), default=1) or 1
+    bars = "".join(
+        _power_bar(r.get("display", r["name"]), r["mah"] / peak, r["mah"],
+                   "var(--accent)" if r.get("kind") == "app" else "var(--muted)")
+        for r in rows
+    )
+    ts = html.escape(str(data.get("ts", "")))
+    return (
+        '<section class="panel"><h2>Where your battery goes</h2>'
+        '<div class="note" style="margin:0 0 12px">Android\'s own per-app and '
+        'per-subsystem power attribution (mAh) since the last full charge, from '
+        '<code>dumpsys batterystats</code>. Green = app, grey = system. '
+        f'Captured {ts}.</div>'
+        f'{bars}</section>'
+    )
+
+
 def build_dashboard(rows) -> str:
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     if not rows:
@@ -896,6 +1003,8 @@ def build_dashboard(rows) -> str:
     else:
         usage = ''
 
+    power = render_power_use()
+
     charts = "".join([
         render_chart(rows, "soh_pct", "State of Health over time", "%",
                      lambda v: f"{v:.1f}%", threshold=REPLACE_SOH_PCT),
@@ -925,6 +1034,7 @@ def build_dashboard(rows) -> str:
       {lifetime}
       {outlook}
       {analytics}
+      {power}
       {usage}
       <section class="charts">{charts}</section>
       <footer>
@@ -1068,6 +1178,33 @@ def cmd_report(args) -> None:
         webbrowser.open(DASHBOARD_PATH.as_uri())
 
 
+def cmd_power(args) -> None:
+    serial = pick_serial(args.serial)
+    print("Pulling batterystats (this can take a few seconds)…")
+    dump = adb("shell", "dumpsys", "batterystats", serial=serial, timeout=120)
+    capacity, rows = parse_power_use(dump)
+    if not rows:
+        print("Could not find an 'Estimated power use (mAh)' section in "
+              "batterystats — this Android build may not expose it in the plain "
+              "dump. Try:  adb bugreport  and open it in Battery Historian.",
+              file=sys.stderr)
+        return
+    uidmap = uid_package_map(serial)
+    for r in rows:
+        r["display"] = resolve_name(r["name"], uidmap) if r["name"].startswith("Uid") else r["name"]
+        # A resolved package name (has a dot) is an app; everything else is system.
+        r["kind"] = "app" if "." in r["display"] else "system"
+    POWER_PATH.write_text(json.dumps(
+        {"ts": datetime.now().isoformat(timespec="seconds"),
+         "capacity": capacity, "rows": rows}, indent=2), encoding="utf-8")
+    top = sorted(rows, key=lambda r: r["mah"], reverse=True)[:10]
+    print(f"Stored {len(rows)} power entries"
+          + (f" (capacity {capacity:.0f} mAh)" if capacity else "") + ". Top consumers:")
+    for r in top:
+        print(f"  {r['mah']:7.1f} mAh  {r['display']}")
+    cmd_report(args)
+
+
 def cmd_show(args) -> None:
     serial = pick_serial(args.serial)
     d = read_battery(serial)
@@ -1113,6 +1250,11 @@ def main() -> None:
     ps = sub.add_parser("show", help="Print a live reading (does not store).")
     ps.add_argument("--serial", help="Target device serial (if multiple).")
     ps.set_defaults(func=cmd_show)
+
+    pp = sub.add_parser("power", help="Per-app battery use from batterystats.")
+    pp.add_argument("--serial", help="Target device serial (if multiple).")
+    pp.add_argument("--open", action="store_true", help="Open the dashboard after.")
+    pp.set_defaults(func=cmd_power)
 
     args = p.parse_args()
     if not args.cmd:
