@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jenil1320.cellspan.analytics.Analysis
 import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
+import io.github.jenil1320.cellspan.analytics.CapacitySource
 import io.github.jenil1320.cellspan.analytics.Condition
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.HistoryPoint
@@ -244,9 +245,13 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
         val holds = analysis?.sohPct?.toInt()
         Text(
             when {
-                holds != null && analysis.sohIsEstimated -> "Your battery holds about $holds% of the charge it did new — estimated from its design capacity."
-                holds != null -> "Your battery holds $holds% of the charge it did new. That's normal for its age."
-                else -> "Exact State of Health needs fuel-gauge access this device doesn't grant to apps. Showing what's available below."
+                holds == null -> "Charge your phone past 20% a few times and Cellspan will measure your battery's real health."
+                analysis.capacitySource == CapacitySource.SESSION ->
+                    "Measured across ${analysis.sessionCount} charge session${if (analysis.sessionCount == 1) "" else "s"} — your battery holds about $holds% of its original capacity."
+                analysis.capacitySource == CapacitySource.GAUGE ->
+                    "Your battery holds $holds% of the charge it did new."
+                else ->
+                    "Estimated at ~$holds% from a single reading — charge past 20% a few times and Cellspan will measure it precisely."
             },
             color = Cell.TextSecondary, fontSize = 14.5.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 16.dp),
         )

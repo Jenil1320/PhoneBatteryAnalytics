@@ -50,6 +50,7 @@ class HistoryStore(context: Context) :
         db.execSQL(DAILY_USAGE_DDL)
         db.execSQL(SOC_LOG_DDL)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_soc_ts ON soc_log(ts)")
+        db.execSQL(SESSIONS_DDL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
@@ -61,6 +62,7 @@ class HistoryStore(context: Context) :
             db.execSQL("ALTER TABLE soc_log ADD COLUMN voltage_mv INTEGER")
             db.execSQL("ALTER TABLE soc_log ADD COLUMN current_ma INTEGER")
         }
+        if (oldV < 5) db.execSQL(SESSIONS_DDL)
     }
 
     fun insert(snapshot: BatterySnapshot, analysis: Analysis) {
@@ -165,13 +167,36 @@ class HistoryStore(context: Context) :
         return out
     }
 
+    /** Record one measured charge-session capacity. */
+    fun insertSession(ts: Long, startLevel: Int, endLevel: Int, measuredMah: Int) {
+        val values = ContentValues().apply {
+            put("ts", ts); put("start_level", startLevel); put("end_level", endLevel)
+            put("measured_mah", measuredMah)
+        }
+        writableDatabase.insert("capacity_sessions", null, values)
+    }
+
+    /** Average measured capacity (mAh) over the most recent [n] sessions, or null. */
+    fun sessionCapacityMah(n: Int = 5): Int? =
+        readableDatabase.rawQuery(
+            "SELECT AVG(measured_mah) FROM (SELECT measured_mah FROM capacity_sessions ORDER BY ts DESC LIMIT ?)",
+            arrayOf(n.toString())
+        ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getDouble(0).toInt() else null }
+
+    fun sessionCount(): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM capacity_sessions", null).use { c ->
+            if (c.moveToFirst()) c.getInt(0) else 0
+        }
+
     companion object {
         private const val DB_NAME = "cellspan.db"
-        private const val DB_VERSION = 4
+        private const val DB_VERSION = 5
         private const val SOC_RETENTION_MS = 3L * 24 * 60 * 60 * 1000  // keep ~3 days
         private const val DAILY_USAGE_DDL =
             "CREATE TABLE IF NOT EXISTS daily_usage (day TEXT PRIMARY KEY, discharged REAL NOT NULL DEFAULT 0)"
         private const val SOC_LOG_DDL =
             "CREATE TABLE IF NOT EXISTS soc_log (ts INTEGER NOT NULL, level INTEGER NOT NULL, temp_c REAL, voltage_mv INTEGER, current_ma INTEGER)"
+        private const val SESSIONS_DDL =
+            "CREATE TABLE IF NOT EXISTS capacity_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, start_level INTEGER, end_level INTEGER, measured_mah INTEGER NOT NULL)"
     }
 }

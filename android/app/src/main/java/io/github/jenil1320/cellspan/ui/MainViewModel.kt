@@ -43,14 +43,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
-            val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            var analysis = BatteryAnalytics.analyze(snapshot, now)
             var history: List<HistoryPoint> = emptyList()
             var usage: List<Pair<String, Double>> = emptyList()
             var socLog: List<SocPoint> = emptyList()
             try {
                 HistoryStore(getApplication()).use { store ->
+                    // Prefer session-measured capacity for a stable SoH.
+                    analysis = BatteryAnalytics.analyze(snapshot, now, store.sessionCapacityMah(), store.sessionCount())
                     val last = store.lastSampleMs()
-                    // Record this reading unless we just stored one (avoid duplicates).
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
                         store.insert(snapshot, analysis)
                     }
@@ -74,11 +76,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun tick() {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
-            val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            var analysis = BatteryAnalytics.analyze(snapshot, now)
             var socLog = _state.value.socLog
             var usage = _state.value.dailyUsage
             try {
                 HistoryStore(getApplication()).use { store ->
+                    analysis = BatteryAnalytics.analyze(snapshot, now, store.sessionCapacityMah(), store.sessionCount())
                     accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))

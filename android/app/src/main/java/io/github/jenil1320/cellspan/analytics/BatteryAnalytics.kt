@@ -14,9 +14,13 @@ enum class Condition(val severity: Int, val label: String) {
  * The result of turning a [BatterySnapshot] into human-meaningful health numbers.
  * All values may be null when the underlying data isn't available on the device.
  */
+enum class CapacitySource { GAUGE, SESSION, ESTIMATE, NONE }
+
 data class Analysis(
     val sohPct: Double?,
     val sohIsEstimated: Boolean,
+    val capacitySource: CapacitySource,
+    val sessionCount: Int,
     val currentCapacityMah: Int?,
     val designCapacityMah: Int?,
     val designIsFromDatabase: Boolean,
@@ -70,19 +74,48 @@ object BatteryAnalytics {
         return listOfNotNull(bySoh, byCyc).maxByOrNull { it.severity } ?: Condition.UNKNOWN
     }
 
-    fun analyze(s: BatterySnapshot, nowMs: Long): Analysis {
+    /**
+     * Measured full-charge capacity (mAh) from one charge session's endpoints:
+     * charge added ÷ fraction of battery gained. Null if the level gain is too
+     * small to be reliable. This is AccuBattery's method and is far steadier
+     * than the instantaneous estimate.
+     */
+    fun measuredCapacityMah(
+        startChargeUah: Long, endChargeUah: Long, startLevel: Int, endLevel: Int, minGain: Int = 20,
+    ): Int? {
+        val dLevel = endLevel - startLevel
+        if (dLevel < minGain) return null
+        val dCharge = endChargeUah - startChargeUah
+        if (dCharge <= 0) return null
+        return ((dCharge / (dLevel / 100.0)) / 1000.0).toInt()
+    }
+
+    fun analyze(
+        s: BatterySnapshot,
+        nowMs: Long,
+        sessionMeasuredMah: Int? = null,
+        sessionCount: Int = 0,
+    ): Analysis {
         // Design capacity: prefer the exact fuel-gauge value, else the table.
         val designFromSysfs = s.chargeFullDesignUah?.let { (it / 1000.0).toInt() }
         val designFromTable = DeviceCapacityTable.designCapacityMah(s.model)
         val designMah = designFromSysfs ?: designFromTable
         val designIsFromDatabase = designFromSysfs == null && designFromTable != null
 
-        // Current full-charge capacity: exact if available, else estimated.
+        // Current full-charge capacity, best source first:
+        // exact gauge value → session-measured average → instantaneous estimate.
         val currentFromSysfs = s.chargeFullUah?.let { (it / 1000.0).toInt() }
         val currentEstimate = estimateFullCapacityMah(s.chargeCounterUah, s.levelPct)
-        val currentMah = currentFromSysfs ?: currentEstimate
+        val currentMah: Int?
+        val source: CapacitySource
+        when {
+            currentFromSysfs != null -> { currentMah = currentFromSysfs; source = CapacitySource.GAUGE }
+            sessionMeasuredMah != null -> { currentMah = sessionMeasuredMah; source = CapacitySource.SESSION }
+            currentEstimate != null -> { currentMah = currentEstimate; source = CapacitySource.ESTIMATE }
+            else -> { currentMah = null; source = CapacitySource.NONE }
+        }
 
-        val sohIsEstimated = !(s.chargeFullUah != null && s.chargeFullDesignUah != null)
+        val sohIsEstimated = source == CapacitySource.ESTIMATE
         val soh: Double? =
             if (currentMah != null && designMah != null && designMah > 0) {
                 val raw = currentMah.toDouble() / designMah * 100.0
@@ -128,6 +161,8 @@ object BatteryAnalytics {
         return Analysis(
             sohPct = soh,
             sohIsEstimated = sohIsEstimated,
+            capacitySource = source,
+            sessionCount = sessionCount,
             currentCapacityMah = currentMah,
             designCapacityMah = designMah,
             designIsFromDatabase = designIsFromDatabase,

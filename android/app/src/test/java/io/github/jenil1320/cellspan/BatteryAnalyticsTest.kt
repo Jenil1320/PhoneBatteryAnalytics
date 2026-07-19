@@ -158,6 +158,29 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun measuredCapacity_fromSessionEndpoints() {
+        // Charged 50% -> 90% adding 1,742,000 µAh -> full 4355 mAh.
+        assertEquals(4355, BatteryAnalytics.measuredCapacityMah(1_500_000, 3_242_000, 50, 90))
+        // Too small a gain -> null.
+        assertNull(BatteryAnalytics.measuredCapacityMah(3_000_000, 3_200_000, 80, 85))
+        // Non-positive charge delta -> null.
+        assertNull(BatteryAnalytics.measuredCapacityMah(3_242_000, 1_500_000, 50, 90))
+    }
+
+    @Test
+    fun analyze_prefersSessionMeasuredOverEstimate() {
+        val a = BatteryAnalytics.analyze(
+            snapshot(level = 36, chargeCounter = 1_264_000, cycles = 796, model = "Pixel 7"),
+            nowMs, sessionMeasuredMah = 3900, sessionCount = 4,
+        )
+        assertEquals(io.github.jenil1320.cellspan.analytics.CapacitySource.SESSION, a.capacitySource)
+        assertEquals(3900, a.currentCapacityMah)
+        assertEquals(4, a.sessionCount)
+        assertFalse(a.sohIsEstimated)
+        assertEquals(89.6, a.sohPct!!, 0.5) // 3900/4355
+    }
+
+    @Test
     fun levelDistribution_bucketsIntoTenBands() {
         val d = BatteryAnalytics.levelDistribution(listOf(5, 12, 15, 100, 0, 99))
         assertEquals(10, d.size)
