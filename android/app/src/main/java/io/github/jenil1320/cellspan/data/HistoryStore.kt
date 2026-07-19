@@ -25,6 +25,17 @@ data class SocPoint(
     val currentMa: Int? = null,
 )
 
+/** One calendar day's aggregated vitals, used for the week/month trends. */
+data class DailyVital(
+    val day: String,
+    val tempMin: Float?,
+    val tempMax: Float?,
+    val tempAvg: Float?,
+    val voltAvg: Float?,
+    val currAvg: Int?,
+    val cycles: Int?,
+)
+
 /**
  * Local, on-device history of battery readings. Plain SQLite (no annotation
  * processing) so the app has no code-gen build steps.
@@ -51,6 +62,7 @@ class HistoryStore(context: Context) :
         db.execSQL(SOC_LOG_DDL)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_soc_ts ON soc_log(ts)")
         db.execSQL(SESSIONS_DDL)
+        db.execSQL(DAILY_VITALS_DDL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
@@ -63,6 +75,7 @@ class HistoryStore(context: Context) :
             db.execSQL("ALTER TABLE soc_log ADD COLUMN current_ma INTEGER")
         }
         if (oldV < 5) db.execSQL(SESSIONS_DDL)
+        if (oldV < 6) db.execSQL(DAILY_VITALS_DDL)
     }
 
     fun insert(snapshot: BatterySnapshot, analysis: Analysis) {
@@ -188,9 +201,56 @@ class HistoryStore(context: Context) :
             if (c.moveToFirst()) c.getInt(0) else 0
         }
 
+    /**
+     * Fold one live reading into its calendar day's running aggregates (min/max/mean
+     * temperature, mean voltage, mean current, latest cycle count). Uses INSERT-OR-IGNORE
+     * then UPDATE so it stays portable to API 26 (no SQLite UPSERT before API 30).
+     */
+    fun recordVitals(dayKey: String, tempC: Float?, voltageV: Float?, currentMa: Int?, cycles: Int?) {
+        writableDatabase.apply {
+            execSQL("INSERT OR IGNORE INTO daily_vitals(day) VALUES(?)", arrayOf(dayKey))
+            if (tempC != null) execSQL(
+                "UPDATE daily_vitals SET temp_min=MIN(COALESCE(temp_min,?),?), temp_max=MAX(COALESCE(temp_max,?),?), " +
+                    "temp_sum=COALESCE(temp_sum,0)+?, temp_n=temp_n+1 WHERE day=?",
+                arrayOf<Any?>(tempC, tempC, tempC, tempC, tempC, dayKey))
+            if (voltageV != null) execSQL(
+                "UPDATE daily_vitals SET volt_sum=COALESCE(volt_sum,0)+?, volt_n=volt_n+1 WHERE day=?",
+                arrayOf<Any?>(voltageV, dayKey))
+            if (currentMa != null) execSQL(
+                "UPDATE daily_vitals SET curr_sum=COALESCE(curr_sum,0)+?, curr_n=curr_n+1 WHERE day=?",
+                arrayOf<Any?>(currentMa, dayKey))
+            if (cycles != null) execSQL(
+                "UPDATE daily_vitals SET cycles=? WHERE day=?", arrayOf<Any?>(cycles, dayKey))
+        }
+    }
+
+    /** The last [days] calendar days of aggregated vitals, oldest first. */
+    fun dailyVitals(days: Int): List<DailyVital> {
+        val out = ArrayList<DailyVital>()
+        readableDatabase.rawQuery(
+            "SELECT day, temp_min, temp_max, temp_sum, temp_n, volt_sum, volt_n, curr_sum, curr_n, cycles FROM " +
+                "(SELECT * FROM daily_vitals ORDER BY day DESC LIMIT ?) ORDER BY day ASC",
+            arrayOf(days.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val tempN = c.getInt(4); val voltN = c.getInt(6); val currN = c.getInt(8)
+                out.add(DailyVital(
+                    day = c.getString(0),
+                    tempMin = if (c.isNull(1)) null else c.getFloat(1),
+                    tempMax = if (c.isNull(2)) null else c.getFloat(2),
+                    tempAvg = if (tempN > 0) (c.getDouble(3) / tempN).toFloat() else null,
+                    voltAvg = if (voltN > 0) (c.getDouble(5) / voltN).toFloat() else null,
+                    currAvg = if (currN > 0) (c.getDouble(7) / currN).toInt() else null,
+                    cycles = if (c.isNull(9)) null else c.getInt(9),
+                ))
+            }
+        }
+        return out
+    }
+
     companion object {
         private const val DB_NAME = "cellspan.db"
-        private const val DB_VERSION = 5
+        private const val DB_VERSION = 6
         private const val SOC_RETENTION_MS = 3L * 24 * 60 * 60 * 1000  // keep ~3 days
         private const val DAILY_USAGE_DDL =
             "CREATE TABLE IF NOT EXISTS daily_usage (day TEXT PRIMARY KEY, discharged REAL NOT NULL DEFAULT 0)"
@@ -198,5 +258,9 @@ class HistoryStore(context: Context) :
             "CREATE TABLE IF NOT EXISTS soc_log (ts INTEGER NOT NULL, level INTEGER NOT NULL, temp_c REAL, voltage_mv INTEGER, current_ma INTEGER)"
         private const val SESSIONS_DDL =
             "CREATE TABLE IF NOT EXISTS capacity_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, start_level INTEGER, end_level INTEGER, measured_mah INTEGER NOT NULL)"
+        private const val DAILY_VITALS_DDL =
+            "CREATE TABLE IF NOT EXISTS daily_vitals (day TEXT PRIMARY KEY, temp_min REAL, temp_max REAL, " +
+                "temp_sum REAL, temp_n INTEGER NOT NULL DEFAULT 0, volt_sum REAL, volt_n INTEGER NOT NULL DEFAULT 0, " +
+                "curr_sum REAL, curr_n INTEGER NOT NULL DEFAULT 0, cycles INTEGER)"
     }
 }

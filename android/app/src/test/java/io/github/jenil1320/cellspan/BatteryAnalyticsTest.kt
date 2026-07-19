@@ -181,6 +181,57 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun dischargeRate_computesPointsPerHour() {
+        // 80% -> 60% over 2 hours = 10 pts/hr.
+        val h = 3_600_000L
+        val s = listOf(0L to 80, h to 70, 2 * h to 60)
+        assertEquals(10.0, BatteryAnalytics.dischargeRatePctPerHour(s)!!, 0.001)
+    }
+
+    @Test
+    fun dischargeRate_nullWhenChargingFlatOrTooShort() {
+        val h = 3_600_000L
+        // Net charging over the window -> null.
+        assertNull(BatteryAnalytics.dischargeRatePctPerHour(listOf(0L to 50, h to 70)))
+        // Flat -> null.
+        assertNull(BatteryAnalytics.dischargeRatePctPerHour(listOf(0L to 50, h to 50)))
+        // Window shorter than the 5-minute floor -> null.
+        assertNull(BatteryAnalytics.dischargeRatePctPerHour(listOf(0L to 80, 60_000L to 79)))
+        assertNull(BatteryAnalytics.dischargeRatePctPerHour(listOf(0L to 80)))
+    }
+
+    @Test
+    fun dischargeRate_usesRunAfterMidWindowCharge() {
+        // Sat at 55%, charged to 75% at t=40min, then drained to 52% by t=60min.
+        // Endpoint-only slope would be a bogus (55-52)/1h ≈ 3%/hr; the fix must use the
+        // post-charge run: (75-52) over 20 min = 69%/hr.
+        val s = listOf(0L to 55, (40 * 60_000L) to 75, (60 * 60_000L) to 52)
+        assertEquals(69.0, BatteryAnalytics.dischargeRatePctPerHour(s)!!, 1.0)
+    }
+
+    @Test
+    fun runtimeLeft_dividesLevelByRate() {
+        // 50% at 10 pts/hr -> 5 hours.
+        assertEquals(5 * 3_600_000L, BatteryAnalytics.runtimeLeftMs(50, 10.0))
+        assertNull(BatteryAnalytics.runtimeLeftMs(50, null))
+        assertNull(BatteryAnalytics.runtimeLeftMs(50, 0.0))
+        assertNull(BatteryAnalytics.runtimeLeftMs(0, 10.0))
+    }
+
+    @Test
+    fun instantaneousRuntime_fromChargeAndCurrent() {
+        // 2,000,000 µAh remaining at 1,000,000 µA draw -> 2 hours.
+        assertEquals(2 * 3_600_000L,
+            BatteryAnalytics.instantaneousRuntimeMs(2_000_000, -1_000_000, "Discharging"))
+        // Charging -> null.
+        assertNull(BatteryAnalytics.instantaneousRuntimeMs(2_000_000, 1_000_000, "Charging"))
+        // Plugged in but holding ("Not charging") -> null, not an on-battery estimate.
+        assertNull(BatteryAnalytics.instantaneousRuntimeMs(2_000_000, -500_000, "Not charging"))
+        // No draw -> null.
+        assertNull(BatteryAnalytics.instantaneousRuntimeMs(2_000_000, 0, "Discharging"))
+    }
+
+    @Test
     fun levelDistribution_bucketsIntoTenBands() {
         val d = BatteryAnalytics.levelDistribution(listOf(5, 12, 15, 100, 0, 99))
         assertEquals(10, d.size)

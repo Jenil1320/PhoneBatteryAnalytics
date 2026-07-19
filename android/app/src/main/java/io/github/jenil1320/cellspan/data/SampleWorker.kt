@@ -29,6 +29,10 @@ class SampleWorker(context: Context, params: WorkerParameters) :
             AccrualCursor.set(applicationContext, snapshot.levelPct)
             store.ensureDay(day)
             store.insert(snapshot, analysis)
+            // Fold this reading into the day's aggregates so week/month trends
+            // build even when the app is never opened.
+            store.recordVitals(day, snapshot.temperatureC, snapshot.voltageV,
+                snapshot.currentUa?.let { (it / 1000).toInt() }, snapshot.cycleCount)
         }
         Result.success()
     } catch (e: Exception) {

@@ -31,6 +31,11 @@ data class Analysis(
     val avgFadePerYear: Double?,
     val etaSohMs: Long?,
     val etaCyclesMs: Long?,
+    // Modeled ("typical") health from the semi-empirical degradation model.
+    val modeledSohPct: Double? = null,
+    val modeledCalendarLossPct: Double? = null,
+    val modeledCyclicLossPct: Double? = null,
+    val modeledHasCalendar: Boolean = false,
 )
 
 /**
@@ -95,6 +100,8 @@ object BatteryAnalytics {
         nowMs: Long,
         sessionMeasuredMah: Int? = null,
         sessionCount: Int = 0,
+        avgTempC: Double? = null,
+        avgDoD: Double? = null,
     ): Analysis {
         // Design capacity: prefer the exact fuel-gauge value, else the table.
         val designFromSysfs = s.chargeFullDesignUah?.let { (it / 1000.0).toInt() }
@@ -158,6 +165,15 @@ object BatteryAnalytics {
             }
         }
 
+        // Modeled ("typical") health from the semi-empirical degradation model.
+        val model = DegradationModel.estimate(
+            equivalentFullCycles = s.cycleCount?.toDouble(),
+            designCapacityMah = designMah,
+            avgDoD = avgDoD,
+            ageDays = ageDays,
+            avgTempC = avgTempC ?: s.temperatureC?.toDouble(),
+        )
+
         return Analysis(
             sohPct = soh,
             sohIsEstimated = sohIsEstimated,
@@ -173,6 +189,10 @@ object BatteryAnalytics {
             avgFadePerYear = fadePerYear,
             etaSohMs = etaSohMs,
             etaCyclesMs = etaCyclesMs,
+            modeledSohPct = model?.modeledSohPct,
+            modeledCalendarLossPct = model?.calendarLossPct,
+            modeledCyclicLossPct = model?.cyclicLossPct,
+            modeledHasCalendar = model?.hasCalendar ?: false,
         )
     }
 
@@ -207,6 +227,49 @@ object BatteryAnalytics {
 
     /** Equivalent full cycles represented by a day's discharged percentage points. */
     fun equivalentCycles(dischargedPct: Double): Double = dischargedPct / 100.0
+
+    /**
+     * Net discharge rate in percentage points per hour from a series of (timestampMs,
+     * level) samples ordered oldest-first. Trims to the most recent continuous discharge
+     * run — everything up to and including the last point where the level rose (a charge
+     * event) is dropped — so a mid-window top-up cannot flatten the slope and inflate the
+     * runtime. Returns null when that run is shorter than [minSpanMs] or shows no drop.
+     */
+    fun dischargeRatePctPerHour(samples: List<Pair<Long, Int>>, minSpanMs: Long = 5 * 60_000L): Double? {
+        if (samples.size < 2) return null
+        var startIdx = 0
+        for (i in 1 until samples.size) {
+            if (samples[i].second > samples[i - 1].second) startIdx = i   // a charge event
+        }
+        val run = samples.subList(startIdx, samples.size)
+        if (run.size < 2) return null
+        val first = run.first()
+        val last = run.last()
+        val spanMs = last.first - first.first
+        if (spanMs < minSpanMs) return null
+        val dropped = first.second - last.second   // positive while discharging
+        if (dropped <= 0) return null
+        return dropped / (spanMs / 3_600_000.0)
+    }
+
+    /** Milliseconds of runtime left for [currentLevel]% at [ratePctPerHour], or null. */
+    fun runtimeLeftMs(currentLevel: Int, ratePctPerHour: Double?): Long? {
+        if (ratePctPerHour == null || ratePctPerHour <= 0.0 || currentLevel <= 0) return null
+        return ((currentLevel / ratePctPerHour) * 3_600_000.0).toLong()
+    }
+
+    /**
+     * Instantaneous runtime estimate from the fuel-gauge draw: remaining charge ÷
+     * present current. Only meaningful while discharging; null otherwise. Noisier than
+     * the level-slope method, so it is used only as a first-run fallback.
+     */
+    fun instantaneousRuntimeMs(chargeCounterUah: Long?, currentUa: Long?, status: String): Long? {
+        if (status != "Discharging") return null   // exclude Charging/Full/Not charging
+        if (chargeCounterUah == null || chargeCounterUah <= 0 || currentUa == null) return null
+        val drawUa = kotlin.math.abs(currentUa)
+        if (drawUa <= 0L) return null
+        return ((chargeCounterUah.toDouble() / drawUa) * 3_600_000.0).toLong()
+    }
 
     /** Distribute charge-level samples into ten 10%-wide bands (0–10 … 90–100). */
     fun levelDistribution(levels: List<Int>): List<Int> {

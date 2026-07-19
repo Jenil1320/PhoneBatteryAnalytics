@@ -8,6 +8,7 @@ import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
 import io.github.jenil1320.cellspan.data.AccrualCursor
 import io.github.jenil1320.cellspan.data.BatteryReader
 import io.github.jenil1320.cellspan.data.BatterySnapshot
+import io.github.jenil1320.cellspan.data.DailyVital
 import io.github.jenil1320.cellspan.data.HistoryStore
 import io.github.jenil1320.cellspan.data.HistoryPoint
 import io.github.jenil1320.cellspan.data.SocPoint
@@ -27,7 +28,10 @@ data class UiState(
     val history: List<HistoryPoint> = emptyList(),
     val dailyUsage: List<Pair<String, Double>> = emptyList(),
     val socLog: List<SocPoint> = emptyList(),
+    val dailyVitals: List<DailyVital> = emptyList(),
 )
+
+private const val TREND_DAYS = 31
 
 private const val SOC_WINDOW_MS = 3L * 24 * 60 * 60 * 1000
 
@@ -48,10 +52,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var history: List<HistoryPoint> = emptyList()
             var usage: List<Pair<String, Double>> = emptyList()
             var socLog: List<SocPoint> = emptyList()
+            var vitals: List<DailyVital> = emptyList()
             try {
                 HistoryStore(getApplication()).use { store ->
-                    // Prefer session-measured capacity for a stable SoH.
-                    analysis = BatteryAnalytics.analyze(snapshot, now, store.sessionCapacityMah(), store.sessionCount())
+                    vitals = store.dailyVitals(TREND_DAYS)
+                    // Prefer session-measured capacity for a stable SoH; feed the
+                    // degradation model the daily-average temperature.
+                    analysis = BatteryAnalytics.analyze(
+                        snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
+                        avgTemp(vitals))
                     val last = store.lastSampleMs()
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
                         store.insert(snapshot, analysis)
@@ -60,6 +69,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
+                    store.recordVitals(dayKey(snapshot.timestampMs), snapshot.temperatureC,
+                        snapshot.voltageV, ma(snapshot.currentUa), snapshot.cycleCount)
                     history = store.recent()
                     usage = store.dailyUsage(7)
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
@@ -67,7 +78,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 // history is best-effort; never let it crash the app
             }
-            _state.value = UiState(false, snapshot, analysis, history, usage, socLog)
+            _state.value = UiState(false, snapshot, analysis, history, usage, socLog, vitals)
         }
     }
 
@@ -80,17 +91,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var analysis = BatteryAnalytics.analyze(snapshot, now)
             var socLog = _state.value.socLog
             var usage = _state.value.dailyUsage
+            var vitals = _state.value.dailyVitals
             try {
                 HistoryStore(getApplication()).use { store ->
-                    analysis = BatteryAnalytics.analyze(snapshot, now, store.sessionCapacityMah(), store.sessionCount())
+                    vitals = store.dailyVitals(TREND_DAYS)
+                    analysis = BatteryAnalytics.analyze(
+                        snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
+                        avgTemp(vitals))
                     accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
+                    store.recordVitals(dayKey(snapshot.timestampMs), snapshot.temperatureC,
+                        snapshot.voltageV, ma(snapshot.currentUa), snapshot.cycleCount)
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
                     usage = store.dailyUsage(7)
                 }
             } catch (e: Exception) { /* ignore */ }
-            _state.value = _state.value.copy(snapshot = snapshot, analysis = analysis, socLog = socLog, dailyUsage = usage)
+            _state.value = _state.value.copy(snapshot = snapshot, analysis = analysis,
+                socLog = socLog, dailyUsage = usage, dailyVitals = vitals)
         }
     }
 
@@ -109,4 +127,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun mv(v: Float?): Int? = v?.let { (it * 1000).toInt() }
     private fun ma(ua: Long?): Int? = ua?.let { (it / 1000).toInt() }
+
+    private fun avgTemp(v: List<DailyVital>): Double? =
+        v.mapNotNull { it.tempAvg?.toDouble() }.average().takeIf { !it.isNaN() }
 }

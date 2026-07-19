@@ -58,6 +58,13 @@ object Fmt {
             else -> "$m mo"
         }
     }
+    fun duration(ms: Long?): String {
+        if (ms == null || ms <= 0) return "—"
+        val totalMin = ms / 60_000
+        val h = totalMin / 60
+        val m = totalMin % 60
+        return if (h > 0) "${h}h ${m}m" else "${m}m"
+    }
     fun date(ms: Long?) = if (ms == null) "—" else SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date(ms))
     fun isoDate(ms: Long?) = if (ms == null) "—" else SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(ms))
     fun time(ms: Long?) = if (ms == null) "" else SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
@@ -96,41 +103,6 @@ private fun socToday(soc: List<SocPoint>): List<Pair<Float, Float>> {
     val today = soc.filter { it.timestampMs >= m }
     return today.map { ((it.timestampMs - m) / 3_600_000f) to it.levelPct.toFloat() }
 }
-private fun tempPoints(soc: List<SocPoint>): List<Pair<Float, Float>> {
-    val pts = soc.filter { it.temperatureC != null }
-    if (pts.isEmpty()) return emptyList()
-    val t0 = pts.first().timestampMs
-    return pts.map { ((it.timestampMs - t0) / 3_600_000f) to it.temperatureC!! }
-}
-private fun voltPoints(soc: List<SocPoint>): List<Pair<Float, Float>> {
-    val pts = soc.filter { it.voltageV != null }
-    if (pts.isEmpty()) return emptyList()
-    val t0 = pts.first().timestampMs
-    return pts.map { ((it.timestampMs - t0) / 3_600_000f) to it.voltageV!! }
-}
-private fun currPoints(soc: List<SocPoint>): List<Pair<Float, Float>> {
-    val pts = soc.filter { it.currentMa != null }
-    if (pts.isEmpty()) return emptyList()
-    val t0 = pts.first().timestampMs
-    return pts.map { ((it.timestampMs - t0) / 3_600_000f) to it.currentMa!!.toFloat() }
-}
-
-@Composable
-private fun MinNowMax(pts: List<Pair<Float, Float>>, fmt: (Float) -> String) {
-    if (pts.isEmpty()) return
-    val ys = pts.map { it.second }
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        Legend("min", fmt(ys.min())); Legend("now", fmt(pts.last().second)); Legend("max", fmt(ys.max()))
-    }
-}
-@Composable
-private fun Legend(k: String, v: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(k.uppercase(), color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.sp, letterSpacing = 1.sp)
-        Text(v, color = Cell.TextSecondary, fontFamily = Mono, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
 // ── Now ──────────────────────────────────────────────────────────────────────
 @Composable
 fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<Pair<String, Double>>, socLog: List<SocPoint>) {
@@ -169,6 +141,29 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
                 else ConditionPill("Estimating", Cell.TextMuted)
+            }
+        }
+
+        // Endurance: time left at the recent discharge slope, with an instantaneous fallback.
+        val runtimeMs = run {
+            val nowTs = snapshot?.timestampMs ?: System.currentTimeMillis()
+            val recent = socLog.filter { it.timestampMs >= nowTs - 90 * 60_000L }.map { it.timestampMs to it.levelPct }
+            val rate = BatteryAnalytics.dischargeRatePctPerHour(recent)
+            BatteryAnalytics.runtimeLeftMs(level, rate)
+                ?: BatteryAnalytics.instantaneousRuntimeMs(snapshot?.chargeCounterUah, snapshot?.currentUa, status)
+        }
+        if (status == "Discharging" && runtimeMs != null) {
+            Spacer(Modifier.height(16.dp))
+            Appear(60) {
+                SurfaceCard {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column {
+                            SectionLabel("Lasts about")
+                            Text("at your recent usage rate", color = Cell.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                        }
+                        Text(Fmt.duration(runtimeMs), color = Cell.Accent, fontFamily = Mono, fontSize = 24.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
             }
         }
 
@@ -275,7 +270,8 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
         val pts = chartPoints(history) { it.sohPct }
         if (pts.isNotEmpty()) {
             Spacer(Modifier.height(24.dp)); SectionLabel("Capacity trend"); Spacer(Modifier.height(10.dp))
-            TimeSeriesChart(pts, yFormat = { "${it.toInt()}%" }, xStart = Fmt.isoDate(history.firstOrNull()?.timestampMs), xEnd = "now",
+            TimeSeriesChart(pts, yFormat = { "${it.toInt()}%" },
+                xStart = Fmt.isoDate(history.firstOrNull { it.sohPct != null }?.timestampMs), xEnd = "now",
                 threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%")
         }
         Spacer(Modifier.height(24.dp))
@@ -284,6 +280,70 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             StatTile(analysis?.designCapacityMah?.let { "$it" } ?: "—", "mAh new")
             StatTile(analysis?.cycleCount?.let { "$it" } ?: "—", "cycles", color = if ((analysis?.cycleCount ?: 0) >= 800) Cell.Bad else Cell.TextPrimary)
         }
+
+        // Measured vs modeled: is this cell aging normally for its cycle count?
+        analysis?.modeledSohPct?.let { modeled ->
+            Spacer(Modifier.height(20.dp))
+            SurfaceCard {
+                Column {
+                    SectionLabel("Measured vs modeled")
+                    Spacer(Modifier.height(12.dp))
+                    val measured = analysis.sohPct
+                    val srcSub = when (analysis.capacitySource) {
+                        CapacitySource.GAUGE -> "fuel gauge"
+                        CapacitySource.SESSION -> "${analysis.sessionCount} sessions"
+                        CapacitySource.ESTIMATE -> "1 reading"
+                        else -> ""
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        VitalTile("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub, Modifier.weight(1f),
+                            accent = analysis.let { conditionColor(it.condition) })
+                        VitalTile("Modeled", "${modeled.toInt()}%", "typical wear", Modifier.weight(1f),
+                            accent = Cell.TextSecondary)
+                    }
+                    if (measured != null) {
+                        val delta = measured - modeled
+                        Text(
+                            when {
+                                delta >= 3 -> "Your battery is holding up better than a typical cell at ${analysis.cycleCount ?: "this"} cycles."
+                                delta <= -3 -> "Your battery is wearing a little faster than a typical cell at ${analysis.cycleCount ?: "this"} cycles."
+                                else -> "Your battery is tracking the typical wear curve for its cycle count."
+                            },
+                            color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                    Text(
+                        "Modeled from a semi-empirical NMC aging model (Schmalstieg / SimSES). Treat it as a typical reference, not a manufacturer figure.",
+                        color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        }
+
+        // Where the modeled wear comes from: cycling vs age/heat.
+        analysis?.modeledCyclicLossPct?.let { cyc ->
+            Spacer(Modifier.height(14.dp))
+            SurfaceCard {
+                Column {
+                    SectionLabel("What's wearing it")
+                    Spacer(Modifier.height(8.dp))
+                    KeyValueRow("From charge cycles", String.format(Locale.US, "−%.1f pts", cyc))
+                    if (analysis.modeledHasCalendar) {
+                        KeyValueRow("From age & heat", String.format(Locale.US, "−%.1f pts", analysis.modeledCalendarLossPct ?: 0.0))
+                    } else {
+                        KeyValueRow("From age & heat", "needs battery age")
+                    }
+                    Text(
+                        if (analysis.modeledHasCalendar)
+                            "Charge cycles wear the electrodes; time and heat grow the internal film. Both are modeled here."
+                        else "Cycle wear is modeled from your cycle count. Calendar wear (age + heat) needs the manufacture date, which stock Android hides from apps.",
+                        color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        }
+
         Spacer(Modifier.height(20.dp))
         SurfaceCard {
             Column {
@@ -302,131 +362,6 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                 }
             }
         }
-        Spacer(Modifier.height(80.dp))
-    }
-}
-
-// ── Analytics ────────────────────────────────────────────────────────────────
-@Composable
-fun AnalyticsScreen(analysis: Analysis?, history: List<HistoryPoint>, dailyUsage: List<Pair<String, Double>>, socLog: List<SocPoint>) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
-        Text("Analytics", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-
-        // Live SoC today.
-        Spacer(Modifier.height(16.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Charge level today  ·  live")
-                Spacer(Modifier.height(12.dp))
-                val today = socToday(socLog)
-                if (today.size >= 2) {
-                    TimeSeriesChart(today, yFormat = { "${it.toInt()}%" },
-                        xStart = Fmt.time(socLog.firstOrNull { it.timestampMs >= startOfToday() }?.timestampMs), xEnd = "now")
-                } else {
-                    Text("Your charge level through the day is tracked live while the app is open — the line grows as time passes.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
-                }
-            }
-        }
-
-        // Voltage (live).
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Voltage  ·  live")
-                Spacer(Modifier.height(12.dp))
-                val vp = voltPoints(socLog)
-                if (vp.size >= 2) {
-                    TimeSeriesChart(vp, yFormat = { String.format(Locale.US, "%.2fV", it) }, lineColor = Cell.Accent,
-                        xStart = Fmt.time(socLog.firstOrNull { it.voltageV != null }?.timestampMs), xEnd = "now")
-                    MinNowMax(vp) { String.format(Locale.US, "%.2f V", it) }
-                } else {
-                    Text("Terminal voltage over time — updates while the app is open.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
-                }
-            }
-        }
-
-        // Current (live).
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Current  ·  live")
-                Spacer(Modifier.height(12.dp))
-                val cp = currPoints(socLog)
-                if (cp.size >= 2) {
-                    TimeSeriesChart(cp, yFormat = { "${it.toInt()}" }, lineColor = Cell.AccentBright,
-                        threshold = 0f, thresholdLabel = "0 mA",
-                        xStart = Fmt.time(socLog.firstOrNull { it.currentMa != null }?.timestampMs), xEnd = "now")
-                    MinNowMax(cp) { "${it.toInt()} mA" }
-                    Spacer(Modifier.height(4.dp))
-                    Text("Positive = charging, negative = draw.", color = Cell.TextFaint, fontSize = 11.sp)
-                } else {
-                    Text("Charge/discharge current over time — updates while the app is open.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
-                }
-            }
-        }
-
-        // Temperature history.
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Temperature")
-                Spacer(Modifier.height(12.dp))
-                val tp = tempPoints(socLog)
-                if (tp.size >= 2) {
-                    TimeSeriesChart(tp, yFormat = { String.format(Locale.US, "%.1f°", it) }, lineColor = Cell.Cool,
-                        xStart = Fmt.time(socLog.firstOrNull { it.temperatureC != null }?.timestampMs), xEnd = "now")
-                    MinNowMax(tp) { String.format(Locale.US, "%.1f°C", it) }
-                } else {
-                    Text("Battery temperature over time appears here as readings accumulate.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
-                }
-            }
-        }
-
-        // Charge-level distribution.
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Where your charge sits")
-                Spacer(Modifier.height(4.dp))
-                Text("Share of time spent at each charge level. The 20–80% middle is gentlest on the cell.",
-                    color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 17.sp)
-                Spacer(Modifier.height(12.dp))
-                val dist = BatteryAnalytics.levelDistribution(socLog.map { it.levelPct })
-                val total = dist.sum().coerceAtLeast(1)
-                val peak = (dist.maxOrNull() ?: 1).coerceAtLeast(1)
-                if (dist.sum() > 0) {
-                    dist.forEachIndexed { i, v ->
-                        HBar("${i * 10}–${i * 10 + 10}%", v.toFloat() / peak, "${(v * 100 / total)}%",
-                            barColor = if (i in 2..7) Cell.Accent else Cell.Warn)
-                    }
-                } else {
-                    Text("Collecting…", color = Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
-                }
-            }
-        }
-
-        // SoH over time.
-        val sohPts = chartPoints(history) { it.sohPct }
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("State of Health over time")
-                Spacer(Modifier.height(12.dp))
-                if (sohPts.isNotEmpty()) {
-                    TimeSeriesChart(sohPts, yFormat = { "${it.toInt()}%" }, xStart = Fmt.isoDate(history.firstOrNull()?.timestampMs), xEnd = "now",
-                        threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%")
-                    Spacer(Modifier.height(6.dp))
-                    Text("${sohPts.size} sample(s)", color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp)
-                } else {
-                    Text("Health trend builds as Cellspan samples your battery over the coming days.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
-                }
-            }
-        }
 
         val cyclePts = chartPoints(history) { it.cycleCount?.toDouble() }
         if (cyclePts.size >= 2) {
@@ -435,27 +370,9 @@ fun AnalyticsScreen(analysis: Analysis?, history: List<HistoryPoint>, dailyUsage
                 Column {
                     SectionLabel("Charge cycles over time")
                     Spacer(Modifier.height(12.dp))
-                    TimeSeriesChart(cyclePts, yFormat = { it.toInt().toString() }, xStart = Fmt.isoDate(history.firstOrNull()?.timestampMs), xEnd = "now",
+                    TimeSeriesChart(cyclePts, yFormat = { it.toInt().toString() },
+                        xStart = Fmt.isoDate(history.firstOrNull { it.cycleCount != null }?.timestampMs), xEnd = "now",
                         lineColor = Cell.AccentDeep, threshold = BatteryAnalytics.REPLACE_CYCLES.toFloat(), thresholdLabel = "800")
-                }
-            }
-        }
-
-        // Daily usage.
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Daily usage")
-                Spacer(Modifier.height(4.dp))
-                if (dailyUsage.isNotEmpty()) {
-                    val avg = dailyUsage.map { it.second }.average()
-                    Text(String.format(Locale.US, "~%.2f equivalent cycles per day", BatteryAnalytics.equivalentCycles(avg)),
-                        color = Cell.TextMuted, fontSize = 12.5.sp)
-                    Spacer(Modifier.height(10.dp))
-                    UsageBars(dailyUsage.map { Fmt.dayShort(it.first) to (it.second / 100.0).toFloat() })
-                } else {
-                    Text("How much battery you use each day appears here as you go — one bar per day.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
                 }
             }
         }
