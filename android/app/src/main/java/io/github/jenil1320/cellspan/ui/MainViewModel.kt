@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.jenil1320.cellspan.analytics.Analysis
 import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
+import io.github.jenil1320.cellspan.data.AccrualCursor
 import io.github.jenil1320.cellspan.data.BatteryReader
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.HistoryStore
@@ -51,14 +52,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val last = store.lastSampleMs()
                     // Record this reading unless we just stored one (avoid duplicates).
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
-                        // Attribute any drop since the last reading to today's usage.
-                        val prev = store.lastLevel()
-                        if (prev != null && snapshot.levelPct < prev) {
-                            store.addDischarge(dayKey(snapshot.timestampMs), (prev - snapshot.levelPct).toDouble())
-                        }
                         store.insert(snapshot, analysis)
                     }
                     store.ensureDay(dayKey(snapshot.timestampMs))
+                    accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
                     history = store.recent()
@@ -78,15 +75,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
             val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
-            val prevLevel = _state.value.snapshot?.levelPct
             var socLog = _state.value.socLog
             var usage = _state.value.dailyUsage
             try {
                 HistoryStore(getApplication()).use { store ->
-                    // Accrue fine-grained discharge between live ticks.
-                    if (prevLevel != null && snapshot.levelPct < prevLevel) {
-                        store.addDischarge(dayKey(snapshot.timestampMs), (prevLevel - snapshot.levelPct).toDouble())
-                    }
+                    accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
@@ -95,6 +88,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) { /* ignore */ }
             _state.value = _state.value.copy(snapshot = snapshot, analysis = analysis, socLog = socLog, dailyUsage = usage)
         }
+    }
+
+    /** Accrue any level drop since the last accrual, using one shared baseline. */
+    private fun accrueDischarge(store: HistoryStore, snapshot: BatterySnapshot) {
+        val app = getApplication<Application>()
+        val prev = AccrualCursor.get(app)
+        if (prev != null && snapshot.levelPct < prev) {
+            store.addDischarge(dayKey(snapshot.timestampMs), (prev - snapshot.levelPct).toDouble())
+        }
+        AccrualCursor.set(app, snapshot.levelPct)
     }
 
     private fun dayKey(ms: Long): String =

@@ -96,34 +96,39 @@ fun DrainsScreen() {
         Spacer(Modifier.height(18.dp))
         SurfaceCard {
             Column {
-                SectionLabel("Apps by screen time  ·  24h")
+                SectionLabel("Apps by recent screen time")
                 Spacer(Modifier.height(10.dp))
-                if (data?.hasUsage == true) {
-                    val apps = data?.apps ?: emptyList()
-                    if (apps.isEmpty()) {
-                        Text("No app usage recorded in the last day.", color = Cell.TextMuted, fontSize = 13.sp)
-                    } else {
-                        val max = apps.maxOf { it.foregroundMs }.coerceAtLeast(1L)
-                        apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, fmtDur(it.foregroundMs)) }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Screen time is a proxy — not measured battery use.", color = Cell.TextFaint, fontSize = 11.sp)
+                when (data?.hasUsage) {
+                    null -> Text("Reading…", color = Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
+                    true -> {
+                        val apps = data?.apps ?: emptyList()
+                        if (apps.isEmpty()) {
+                            Text("No app usage recorded recently.", color = Cell.TextMuted, fontSize = 13.sp)
+                        } else {
+                            val max = apps.maxOf { it.foregroundMs }.coerceAtLeast(1L)
+                            apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, fmtDur(it.foregroundMs)) }
+                            Spacer(Modifier.height(8.dp))
+                            Text("Foreground time over roughly the last day — a proxy, not measured battery use.",
+                                color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp)
+                        }
                     }
-                } else {
-                    Text("Grant Usage Access to rank apps by recent screen time.",
-                        color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
-                    Spacer(Modifier.height(12.dp))
-                    Box(
-                        Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
-                            .border(1.dp, Cell.BorderAccent, RoundedCornerShape(10.dp))
-                            .clickable {
-                                runCatching {
-                                    context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    false -> {
+                        Text("Grant Usage Access to rank apps by recent screen time.",
+                            color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Box(
+                            Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
+                                .border(1.dp, Cell.BorderAccent, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    runCatching {
+                                        context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                    }
                                 }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 11.dp),
-                    ) {
-                        Text("Grant Usage Access", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                .padding(horizontal = 16.dp, vertical = 11.dp),
+                        ) {
+                            Text("Grant Usage Access", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                        }
                     }
                 }
             }

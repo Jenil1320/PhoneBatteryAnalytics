@@ -20,11 +20,14 @@ class SampleWorker(context: Context, params: WorkerParameters) :
         val snapshot = BatteryReader.read(applicationContext)
         val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
         HistoryStore(applicationContext).use { store ->
-            val prev = store.lastLevel()
+            val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(snapshot.timestampMs))
+            // Shared accrual baseline (same one tick()/refresh() use) → counted once.
+            val prev = AccrualCursor.get(applicationContext)
             if (prev != null && snapshot.levelPct < prev) {
-                val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(snapshot.timestampMs))
                 store.addDischarge(day, (prev - snapshot.levelPct).toDouble())
             }
+            AccrualCursor.set(applicationContext, snapshot.levelPct)
+            store.ensureDay(day)
             store.insert(snapshot, analysis)
         }
         Result.success()

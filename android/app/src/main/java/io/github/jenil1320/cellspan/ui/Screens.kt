@@ -201,7 +201,9 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
             }
         }
 
-        val todayKey = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+        // Derive from the live snapshot time so it rolls over correctly at midnight.
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            .format(Date(snapshot?.timestampMs ?: System.currentTimeMillis()))
         val usedToday = dailyUsage.firstOrNull { it.first == todayKey }?.second ?: 0.0
         Spacer(Modifier.height(12.dp))
         Appear(200) {
@@ -353,7 +355,7 @@ fun AnalyticsScreen(analysis: Analysis?, history: List<HistoryPoint>, dailyUsage
                 val tp = tempPoints(socLog)
                 if (tp.size >= 2) {
                     TimeSeriesChart(tp, yFormat = { String.format(Locale.US, "%.1f°", it) }, lineColor = Cell.Cool,
-                        xStart = Fmt.time(socLog.firstOrNull()?.timestampMs), xEnd = "now")
+                        xStart = Fmt.time(socLog.firstOrNull { it.temperatureC != null }?.timestampMs), xEnd = "now")
                     MinNowMax(tp) { String.format(Locale.US, "%.1f°C", it) }
                 } else {
                     Text("Battery temperature over time appears here as readings accumulate.",
