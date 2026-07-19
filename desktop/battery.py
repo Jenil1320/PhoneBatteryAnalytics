@@ -706,28 +706,46 @@ def render_chart(rows, value_key: str, title: str, unit: str,
 # --------------------------------------------------------------------------- #
 
 def parse_power_use(dump: str):
-    """Extract the 'Estimated power use (mAh)' section: (capacity, [{name, mah}])."""
+    """
+    Extract the 'Estimated power use (mAh)' section → (capacity, [{name, mah}]).
+
+    Android's format nests things: system components (screen/cpu/wifi/GPU…) sit
+    under a `Global` header at 4-space indent and are then repeated inside deeper
+    `(on battery…)` / `(not on battery…)` sub-blocks; apps are `UID <id>: <mAh>`
+    at 2-space indent followed by `=`-style detail lines. We keep only the
+    top-level component totals (deduped) and the UID totals.
+    """
     lines = dump.splitlines()
     idx = next((i for i, l in enumerate(lines) if "Estimated power use (mAh)" in l), None)
     if idx is None:
         return None, None
     capacity = None
     rows = []
+    seen = set()
+    num = r"([-+]?[\d.]+(?:[eE][-+]?\d+)?)"
     for l in lines[idx + 1:]:
         if not l.strip():
             break
-        if not (l.startswith(" ") or l.startswith("\t")):
-            break
+        indent = len(l) - len(l.lstrip(" "))
         s = l.strip()
-        mcap = re.search(r"Capacity:\s*([\d.]+)", s)
-        if mcap and not s.startswith("Uid"):
-            capacity = float(mcap.group(1))
+        if s.startswith("Capacity:"):
+            m = re.search(r"Capacity:\s*([\d.]+)", s)
+            if m:
+                capacity = float(m.group(1))
             continue
-        if s.startswith(("Computed drain", "actual drain")):
+        if s.startswith("(") or s == "Global":
             continue
-        m = re.match(r"([A-Za-z][\w /.():-]*?):\s*([\d.]+)", s)
-        if m:
-            rows.append({"name": m.group(1).strip(), "mah": float(m.group(2))})
+        # UID totals (2-space indent): "UID 1000: 0.894 bg: 0.894"
+        mu = re.match(r"(UID\s+\S+):\s*" + num, s)
+        if mu and indent <= 3:
+            rows.append({"name": mu.group(1).strip(), "mah": float(mu.group(2))})
+            continue
+        # System components — only the top-level (4-space) copy, deduped.
+        if 4 <= indent <= 5 and "=" not in s.split(":", 1)[0]:
+            mc = re.match(r"([A-Za-z][\w ]*?):\s*" + num, s)
+            if mc and mc.group(1).strip() not in seen:
+                seen.add(mc.group(1).strip())
+                rows.append({"name": mc.group(1).strip(), "mah": float(mc.group(2))})
     return capacity, rows
 
 
@@ -745,11 +763,11 @@ def uid_package_map(serial: str) -> dict:
 
 
 def resolve_name(name: str, uidmap: dict) -> str:
-    m = re.match(r"Uid\s+u(\d+)a(\d+)", name)
+    m = re.match(r"UID\s+u(\d+)a(\d+)", name, re.I)
     if m:
         uid = int(m.group(1)) * 100000 + 10000 + int(m.group(2))
         return uidmap.get(uid, name)
-    m2 = re.match(r"Uid\s+(\d+)", name)
+    m2 = re.match(r"UID\s+(\d+)", name, re.I)
     if m2:
         uid = int(m2.group(1))
         # Well-known system UIDs win over any package that happens to share the UID.
@@ -763,17 +781,17 @@ def resolve_name(name: str, uidmap: dict) -> str:
 
 def is_system_consumer(name: str) -> bool:
     """True for OS subsystems and platform UIDs (uid < 10000); False for real apps."""
-    if not name.startswith("Uid"):
-        return True  # named subsystem: Screen, Wi-Fi, Cell standby, Idle, …
-    if re.match(r"Uid\s+u\d+a\d+", name):
+    if not name.upper().startswith("UID"):
+        return True  # named subsystem: screen, cpu, wifi, GPU, bluetooth, …
+    if re.match(r"UID\s+u\d+a\d+", name, re.I):
         return False  # u0aNNN → application UID
-    m = re.match(r"Uid\s+(\d+)", name)
+    m = re.match(r"UID\s+(\d+)", name, re.I)
     if m:
         return int(m.group(1)) < 10000
     return True
 
 
-def _power_bar(label: str, frac: float, val: float, color: str) -> str:
+def _power_bar(label: str, frac: float, right: str, color: str) -> str:
     w = max(1, min(100, int(frac * 100)))
     return (
         '<div style="display:flex;align-items:center;gap:12px;margin:5px 0">'
@@ -782,9 +800,17 @@ def _power_bar(label: str, frac: float, val: float, color: str) -> str:
         f'{html.escape(label)}</span>'
         '<span style="flex:1;height:15px;background:var(--grid);border-radius:5px;overflow:hidden">'
         f'<span style="display:block;height:100%;width:{w}%;background:{color};border-radius:5px"></span></span>'
-        f'<span class="mono" style="width:66px;text-align:right;font-size:11px;color:var(--muted)">'
-        f'{val:.0f} mAh</span></div>'
+        f'<span class="mono" style="width:52px;text-align:right;font-size:11px;color:var(--muted)">'
+        f'{html.escape(right)}</span></div>'
     )
+
+
+def _fmt_pct(p: float) -> str:
+    if p >= 1:
+        return f"{p:.0f}%"
+    if p >= 0.1:
+        return f"{p:.1f}%"
+    return "<0.1%"
 
 
 def render_power_use() -> str:
@@ -797,21 +823,31 @@ def render_power_use() -> str:
     rows = [r for r in (data.get("rows") or []) if r.get("mah", 0) > 0]
     if not rows:
         return ""
+    # Total drain = sum of the subsystem component totals (screen/cpu/wifi/…);
+    # the UID rows are an attribution of that same drain to who used it.
+    total = sum(r["mah"] for r in rows if not str(r["name"]).upper().startswith("UID"))
+    if total <= 0:
+        total = sum(r["mah"] for r in rows) or 1
     rows.sort(key=lambda r: r["mah"], reverse=True)
     rows = rows[:15]
-    peak = max((r["mah"] for r in rows), default=1) or 1
+    peak_pct = max((r["mah"] / total * 100 for r in rows), default=1) or 1
     bars = "".join(
-        _power_bar(r.get("display", r["name"]), r["mah"] / peak, r["mah"],
-                   "var(--accent)" if r.get("kind") == "app" else "var(--muted)")
+        _power_bar(
+            r.get("display", r["name"]),
+            (r["mah"] / total * 100) / peak_pct,
+            _fmt_pct(r["mah"] / total * 100),
+            "var(--accent)" if r.get("kind") == "app" else "var(--muted)",
+        )
         for r in rows
     )
     ts = html.escape(str(data.get("ts", "")))
+    tiny = "  Very little has discharged since the last full charge — use the phone on battery a while, then re-run for a fuller picture." if total < 30 else ""
     return (
         '<section class="panel"><h2>Where your battery goes</h2>'
-        '<div class="note" style="margin:0 0 12px">Android\'s own per-app and '
-        'per-subsystem power attribution (mAh) since the last full charge, from '
-        '<code>dumpsys batterystats</code>. Green = app, grey = system. '
-        f'Captured {ts}.</div>'
+        '<div class="note" style="margin:0 0 12px">Share of the battery drain since '
+        'the last full charge, per app and per subsystem, from '
+        f'<code>dumpsys batterystats</code> (total ≈ {total:.0f} mAh). '
+        f'Green = app, grey = system. Captured {ts}.{tiny}</div>'
         f'{bars}</section>'
     )
 
@@ -1208,17 +1244,18 @@ def cmd_power(args) -> None:
         return
     uidmap = uid_package_map(serial)
     for r in rows:
-        r["display"] = resolve_name(r["name"], uidmap) if r["name"].startswith("Uid") else r["name"]
+        r["display"] = resolve_name(r["name"], uidmap) if r["name"].upper().startswith("UID") else r["name"]
         # Classify by the actual UID, not the presence of a dot in the name.
         r["kind"] = "system" if is_system_consumer(r["name"]) else "app"
     POWER_PATH.write_text(json.dumps(
         {"ts": datetime.now().isoformat(timespec="seconds"),
          "capacity": capacity, "rows": rows}, indent=2), encoding="utf-8")
+    total = sum(r["mah"] for r in rows if not r["name"].upper().startswith("UID")) or \
+        (sum(r["mah"] for r in rows) or 1)
     top = sorted(rows, key=lambda r: r["mah"], reverse=True)[:10]
-    print(f"Stored {len(rows)} power entries"
-          + (f" (capacity {capacity:.0f} mAh)" if capacity else "") + ". Top consumers:")
+    print(f"Stored {len(rows)} power entries (total drain ≈ {total:.0f} mAh). Top consumers:")
     for r in top:
-        print(f"  {r['mah']:7.1f} mAh  {r['display']}")
+        print(f"  {r['mah'] / total * 100:5.1f}%  {r['display']}")
     cmd_report(args)
 
 
