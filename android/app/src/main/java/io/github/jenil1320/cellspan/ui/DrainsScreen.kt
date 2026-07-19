@@ -47,7 +47,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-private data class DrainsData(val drains: List<DrainItem>, val hasUsage: Boolean, val apps: List<UsageItem>)
+private data class DrainsData(
+    val drains: List<DrainItem>,
+    val hasUsage: Boolean,
+    val apps: List<UsageItem>,
+    val sinceMs: Long = 0L,
+)
+
+private fun startOfToday(): Long = java.util.Calendar.getInstance().apply {
+    set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+    set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+}.timeInMillis
 
 private fun costColor(c: DrainCost) = when (c) {
     DrainCost.HIGH -> Cell.Bad; DrainCost.MEDIUM -> Cell.Warn; DrainCost.LOW -> Cell.Accent
@@ -65,10 +75,11 @@ fun DrainsScreen() {
         while (true) {
             data = withContext(Dispatchers.IO) {
                 val now = System.currentTimeMillis()
+                val since = startOfToday()
                 val access = AppUsage.hasAccess(context)
                 DrainsData(
                     SystemDrains.read(context), access,
-                    if (access) AppUsage.top(context, now - 24 * 3600 * 1000L, now) else emptyList(),
+                    if (access) AppUsage.top(context, since, now) else emptyList(), since,
                 )
             }
             delay(10_000)
@@ -96,7 +107,15 @@ fun DrainsScreen() {
         Spacer(Modifier.height(18.dp))
         SurfaceCard {
             Column {
-                SectionLabel("Apps by recent screen time")
+                SectionLabel("Screen time · today")
+                data?.sinceMs?.takeIf { it > 0 }?.let { since ->
+                    Text(
+                        "Since ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(since))}" +
+                            " · visible time, like Digital Wellbeing",
+                        color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 when (data?.hasUsage) {
                     null -> Text("Reading…", color = Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
@@ -108,7 +127,7 @@ fun DrainsScreen() {
                             val max = apps.maxOf { it.foregroundMs }.coerceAtLeast(1L)
                             apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, fmtDur(it.foregroundMs)) }
                             Spacer(Modifier.height(8.dp))
-                            Text("Foreground time over roughly the last day — a proxy, not measured battery use.",
+                            Text("Visible screen time today — a proxy for battery use, not per-app mAh (Android reserves that for Settings).",
                                 color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp)
                         }
                     }

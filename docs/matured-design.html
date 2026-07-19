@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cellspan — Matured design direction</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0c0a; --panel:#12160f; --surf:#161a14; --surf2:#1b2018;
+    --line:rgba(255,255,255,.08); --line2:rgba(255,255,255,.13);
+    --g:#86bd7a; --g2:#8ec47e; --gd:#4f8a45; --gbright:#a6d89a;
+    --tp:#edefe9; --ts:#bac0b3; --tm:#868d80; --tf:#636a5d; --stat:#cfd3ca;
+    --warn:#d9b45a; --bad:#d3705c; --cool:#6fb6cc;
+  }
+  body{background:radial-gradient(120% 80% at 50% -10%,#12160f,#0a0c0a 60%);color:var(--tp);
+    font-family:'Space Grotesk',system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+    padding:40px 28px 80px;min-height:100vh}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  header{max-width:1200px;margin:0 auto 8px}
+  .kicker{font:600 11px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;color:var(--g);text-transform:uppercase}
+  h1{font-size:30px;font-weight:600;letter-spacing:-.02em;margin:10px 0 6px}
+  .sub{color:var(--tm);font-size:14px;max-width:640px;line-height:1.55}
+  .rail{display:flex;gap:34px;overflow-x:auto;padding:34px 4px 10px;max-width:1200px;margin:0 auto;
+    scrollbar-width:thin}
+  .col{flex:none;width:330px}
+  .cap{display:flex;gap:9px;align-items:baseline;margin-bottom:14px;min-height:52px}
+  .cid{font:600 10px 'IBM Plex Mono',monospace;background:rgba(134,189,122,.14);color:var(--g);
+    padding:3px 7px;border-radius:5px;letter-spacing:.04em}
+  .ct{font-size:14px;font-weight:600}
+  .cd{font-size:12px;color:var(--tm);line-height:1.45;margin-top:2px}
+  /* phone */
+  .ph{width:330px;height:700px;border-radius:42px;padding:7px;
+    background:linear-gradient(150deg,#050705,#141613);
+    box-shadow:0 40px 80px -34px rgba(0,0,0,.7),inset 0 0 0 1.4px rgba(255,255,255,.06)}
+  .scr{position:relative;width:100%;height:100%;background:var(--bg);border-radius:36px;overflow:hidden;
+    display:flex;flex-direction:column}
+  .stbar{display:flex;justify-content:space-between;padding:13px 22px 0;font:500 12px 'IBM Plex Mono';color:var(--stat)}
+  .body{padding:14px 20px 64px;overflow:hidden;flex:1}
+  .nav{position:absolute;bottom:0;left:0;right:0;height:60px;display:flex;justify-content:space-around;
+    align-items:flex-start;padding:12px 22px 0;background:linear-gradient(0deg,var(--bg),transparent);
+    border-top:1px solid var(--line)}
+  .ni{display:flex;flex-direction:column;align-items:center;gap:6px;font:500 9.5px 'Space Grotesk';color:var(--tf)}
+  .ni.on{color:var(--g)}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .dot.o{background:transparent;box-shadow:inset 0 0 0 1.4px currentColor}
+  .lbl{font:500 9.5px 'IBM Plex Mono';letter-spacing:.14em;color:var(--tf);text-transform:uppercase}
+  .card{background:var(--surf);border:1px solid var(--line);border-radius:16px;padding:13px 14px;margin-top:11px}
+  .pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:100px;font-size:11.5px;font-weight:500}
+  .pill.g{background:rgba(134,189,122,.13);border:1px solid rgba(134,189,122,.3);color:var(--gbright)}
+  .pill.n{background:rgba(255,255,255,.05);border:1px solid var(--line2);color:var(--tm)}
+  .note{font-size:11px;color:var(--tf);line-height:1.5}
+  .foot{max-width:1200px;margin:36px auto 0;color:var(--tm);font-size:13px;line-height:1.7}
+  .foot b{color:var(--g2);font-weight:600}
+  .tri{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px}
+  .tri>div{padding:0 2px}
+  .big{font-size:15px;font-weight:500}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="kicker">Cellspan · design direction v2</div>
+  <h1>Matured, AccuBattery-class — in the Cellspan green</h1>
+  <p class="sub">Four screens that lift Cellspan to reference-app density: a three-source State of Health (measured · modeled · gauge), a physics-based degradation breakdown adapted from the simSES aging model, real-time endurance estimates, and full charge/discharge session logs.</p>
+</header>
+
+<div class="rail">
+
+  <!-- 2a Health -->
+  <div class="col">
+    <div class="cap"><span class="cid">2a</span><div><div class="ct">Health — three sources, one number</div><div class="cd">Measured (charge sessions), modeled (degradation physics) and the raw gauge, cross-checked. Capacity scatter with a regression trend and forecast.</div></div></div>
+    <div class="ph"><div class="scr">
+      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 83</span></div>
+      <div class="body">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span class="lbl">State of Health</span><span class="mono" style="font-size:11px;color:var(--tf)">Pixel 7 · 3y 8m</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;margin-top:14px">
+          <span style="font-size:88px;line-height:.82;font-weight:600;letter-spacing:-.03em">83</span>
+          <span style="font-size:26px;color:var(--tm);margin-top:6px">%</span>
+          <div style="margin:6px 0 0 14px">
+            <span class="pill g"><span class="dot"></span>Aging — healthy</span>
+          </div>
+        </div>
+        <!-- three sources -->
+        <div class="card" style="display:flex;gap:6px;padding:11px 12px">
+          <div style="flex:1"><div class="lbl">Measured</div><div class="mono big" style="color:var(--gbright)">83%</div><div class="note">5 sessions</div></div>
+          <div style="flex:1;border-left:1px solid var(--line);padding-left:10px"><div class="lbl">Modeled</div><div class="mono big" style="color:var(--cool)">82%</div><div class="note">simSES</div></div>
+          <div style="flex:1;border-left:1px solid var(--line);padding-left:10px"><div class="lbl">Gauge</div><div class="mono big">83%</div><div class="note">fuel IC</div></div>
+        </div>
+        <!-- scatter + regression -->
+        <div class="lbl" style="margin:14px 0 8px">Capacity over time · mAh</div>
+        <svg width="290" height="118" viewBox="0 0 290 118" style="overflow:visible">
+          <line x1="0" y1="8" x2="290" y2="8" stroke="rgba(255,255,255,.05)"/>
+          <line x1="0" y1="104" x2="290" y2="104" stroke="rgba(255,255,255,.05)"/>
+          <text x="0" y="4" class="mono" fill="#636a5d" font-size="8">4355</text>
+          <text x="0" y="114" class="mono" fill="#636a5d" font-size="8">80%</text>
+          <line x1="0" y1="98" x2="290" y2="98" stroke="rgba(211,112,92,.5)" stroke-dasharray="3 4"/>
+          <!-- session dots -->
+          <g fill="#86bd7a">
+            <circle cx="10" cy="20" r="2.4"/><circle cx="35" cy="24" r="2.4"/><circle cx="55" cy="22" r="2.4"/>
+            <circle cx="80" cy="34" r="2.4"/><circle cx="105" cy="40" r="2.4"/><circle cx="128" cy="46" r="2.4"/>
+            <circle cx="150" cy="52" r="2.4"/><circle cx="172" cy="60" r="2.4"/><circle cx="196" cy="66" r="2.4"/>
+            <circle cx="220" cy="72" r="2.4"/><circle cx="244" cy="78" r="2.4"/><circle cx="268" cy="82" r="3.4"/>
+          </g>
+          <g fill="#636a5d" opacity=".55"><circle cx="60" cy="14" r="1.8"/><circle cx="140" cy="66" r="1.8"/><circle cx="210" cy="60" r="1.8"/></g>
+          <!-- regression -->
+          <path d="M6,18 L284,86" stroke="#8ec47e" stroke-width="2" stroke-linecap="round"/>
+          <path d="M284,86 L330,98" stroke="#636a5d" stroke-width="1.6" stroke-dasharray="3 4"/>
+          <circle cx="268" cy="82" r="5.5" fill="rgba(134,189,122,.2)"/>
+        </svg>
+        <div class="tri" style="margin-top:14px">
+          <div><div class="mono big">-3.1%</div><div class="lbl">loss / yr</div></div>
+          <div><div class="mono big">~2027</div><div class="lbl">hits 80%</div></div>
+          <div><div class="mono big">0.86</div><div class="lbl">R²</div></div>
+        </div>
+      </div>
+      <div class="nav"><div class="ni on"><span class="dot"></span>Health</div><div class="ni"><span class="dot o"></span>Now</div><div class="ni"><span class="dot o"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+    </div></div>
+  </div>
+
+  <!-- 2b Degradation model -->
+  <div class="col">
+    <div class="cap"><span class="cid">2b</span><div><div class="ct">Why it aged — the simSES model</div><div class="cd">Splits fade into calendar vs cyclic aging using the phone's own logged temperature/charge-level exposure and cycle distribution.</div></div></div>
+    <div class="ph"><div class="scr">
+      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 83</span></div>
+      <div class="body">
+        <span class="lbl">Degradation model</span>
+        <p style="font-size:13.5px;color:var(--ts);line-height:1.5;margin-top:10px">Your battery has lost about <b style="color:var(--tp)">17%</b> of its original capacity. Here's where it came from.</p>
+        <!-- split bar -->
+        <div style="margin-top:16px">
+          <div style="display:flex;height:26px;border-radius:8px;overflow:hidden">
+            <div style="width:53%;background:linear-gradient(90deg,#5f9a52,#8ec47e);display:flex;align-items:center;justify-content:center;font:600 11px 'IBM Plex Mono';color:#0b1408">9% cal</div>
+            <div style="width:47%;background:linear-gradient(90deg,#c78a3a,#d9b45a);display:flex;align-items:center;justify-content:center;font:600 11px 'IBM Plex Mono';color:#231a08">8% cyc</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px"><span class="note">Calendar aging</span><span class="note">Cyclic aging</span></div>
+        </div>
+        <div class="card">
+          <div class="lbl" style="color:var(--g)">Calendar · time + heat + charge level</div>
+          <div class="row"><span class="note">Age</span><span class="mono" style="font-size:12px">3.7 yr</span></div>
+          <div class="row"><span class="note">Avg temperature</span><span class="mono" style="font-size:12px;color:var(--warn)">31 °C</span></div>
+          <div class="row"><span class="note">Time above 80% charge</span><span class="mono" style="font-size:12px">116 h</span></div>
+        </div>
+        <div class="card">
+          <div class="lbl" style="color:var(--warn)">Cyclic · throughput + depth</div>
+          <div class="row"><span class="note">Full-equivalent cycles</span><span class="mono" style="font-size:12px">797</span></div>
+          <div class="row"><span class="note">Typical depth of discharge</span><span class="mono" style="font-size:12px">42%</span></div>
+          <div class="row"><span class="note">Cycles / day</span><span class="mono" style="font-size:12px">0.6</span></div>
+        </div>
+        <p class="note" style="margin-top:11px">Semi-empirical model (calendar √t·Arrhenius·SoC-stress + cyclic DoD·throughput), adapted from the simSES storage-degradation approach.</p>
+      </div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Health</div><div class="ni on"><span class="dot"></span>Model</div><div class="ni"><span class="dot o"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+    </div></div>
+  </div>
+
+  <!-- 2c Now / endurance -->
+  <div class="col">
+    <div class="cap"><span class="cid">2c</span><div><div class="ct">Now — endurance &amp; live stats</div><div class="cd">"Lasts for" at light / normal / heavy use, live current, average drain, temperature, voltage — with the wobbling charge orb.</div></div></div>
+    <div class="ph"><div class="scr">
+      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 64</span></div>
+      <div class="body">
+        <div style="display:flex;justify-content:space-between"><span class="lbl">Right now</span><span class="mono" style="font-size:11px;color:var(--tf)">Discharging</span></div>
+        <!-- orb -->
+        <div style="display:flex;justify-content:center;margin-top:12px">
+          <div style="position:relative;width:150px;height:150px;border-radius:50%;overflow:hidden;background:#101310;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.06)">
+            <div style="position:absolute;left:0;right:0;bottom:0;height:64%;background:linear-gradient(0deg,#4f8a45,#8ec47e)"></div>
+            <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+              <span style="font-size:44px;font-weight:600;line-height:.8">64</span><span class="mono" style="font-size:9px;color:var(--stat);letter-spacing:.1em;margin-top:3px">2% / h</span>
+            </div>
+          </div>
+        </div>
+        <div class="lbl" style="margin:16px 0 8px">Lasts for</div>
+        <div class="card" style="padding:11px 13px">
+          <div class="row"><span style="font-size:12.5px">☾ Light use</span><span class="mono" style="font-size:13px;color:var(--gbright)">31 h 40 m</span></div>
+          <div class="row"><span style="font-size:12.5px">◐ Normal use</span><span class="mono" style="font-size:13px">12 h 10 m</span></div>
+          <div class="row"><span style="font-size:12.5px">◉ Heavy use</span><span class="mono" style="font-size:13px;color:var(--warn)">4 h 55 m</span></div>
+        </div>
+        <div class="tri" style="margin-top:13px">
+          <div><div class="mono big" style="color:var(--bad)">-524 mA</div><div class="lbl">current</div></div>
+          <div><div class="mono big">31.0°</div><div class="lbl">temp</div></div>
+          <div><div class="mono big">3.99 V</div><div class="lbl">voltage</div></div>
+        </div>
+        <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+          <div><div class="lbl">Avg drain</div><div class="mono big">2.1% / h</div></div>
+          <div style="text-align:right"><div class="lbl">Since unplugged</div><div class="mono big">-1,139 mAh</div></div>
+        </div>
+      </div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Health</div><div class="ni on"><span class="dot"></span>Now</div><div class="ni"><span class="dot o"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+    </div></div>
+  </div>
+
+  <!-- 2d History / sessions -->
+  <div class="col">
+    <div class="cap"><span class="cid">2d</span><div><div class="ct">History — session logs</div><div class="cd">Every charge and discharge as a card: time-stamped range, screen-on time, wear in cycles, efficiency dots — plus estimated per-app drain.</div></div></div>
+    <div class="ph"><div class="scr">
+      <div class="stbar"><span>9:41</span><span>▼⃫ ◗ 64</span></div>
+      <div class="body">
+        <span class="lbl">Sessions · today</span>
+        <div class="card" style="border-left:2px solid var(--bad)">
+          <div style="display:flex;justify-content:space-between"><span style="font-size:12.5px;font-weight:500">Discharge · 8h 31m</span><span class="mono" style="font-size:10px;color:var(--tf)">16:34</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px"><span class="mono" style="font-size:19px">70→28%</span><span class="mono" style="font-size:12px;color:var(--bad)">-1,878 mAh</span></div>
+          <div style="height:5px;border-radius:3px;margin-top:8px;background:linear-gradient(90deg,#d3705c 60%,#3a2420 60%)"></div>
+          <div class="note" style="margin-top:6px">Screen on 2h 33m · -42%</div>
+        </div>
+        <div class="card" style="border-left:2px solid var(--g)">
+          <div style="display:flex;justify-content:space-between"><span style="font-size:12.5px;font-weight:500">Charge · 1h 07m</span><span class="mono" style="font-size:10px;color:var(--tf)">15:04</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px"><span class="mono" style="font-size:19px">40→62%</span><span class="mono" style="font-size:12px;color:var(--g)">+22% · +990 mAh</span></div>
+          <div style="display:flex;justify-content:space-between;margin-top:7px"><span class="note">Wear 0.02 cyc · Eff 88%</span><span style="letter-spacing:1px;color:var(--g);font-size:9px">●●●●●</span></div>
+        </div>
+        <div class="lbl" style="margin:14px 0 8px">Estimated app drain · today</div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;font-size:11px">WhatsApp</span><span style="flex:1;height:9px;border-radius:4px;background:#1e241a;overflow:hidden"><span style="display:block;height:100%;width:74%;background:var(--g)"></span></span><span class="mono" style="font-size:10px;color:var(--tm)">210 mAh</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;font-size:11px">X</span><span style="flex:1;height:9px;border-radius:4px;background:#1e241a;overflow:hidden"><span style="display:block;height:100%;width:52%;background:var(--g)"></span></span><span class="mono" style="font-size:10px;color:var(--tm)">148 mAh</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:64px;font-size:11px">Chrome</span><span style="flex:1;height:9px;border-radius:4px;background:#1e241a;overflow:hidden"><span style="display:block;height:100%;width:30%;background:var(--g)"></span></span><span class="mono" style="font-size:10px;color:var(--tm)">86 mAh</span></div>
+        </div>
+        <p class="note" style="margin-top:10px">Estimate = screen-on drain shared by foreground time. Exact per-app mAh needs the desktop tool.</p>
+      </div>
+      <div class="nav"><div class="ni"><span class="dot o"></span>Health</div><div class="ni"><span class="dot o"></span>Now</div><div class="ni on"><span class="dot"></span>History</div><div class="ni"><span class="dot o"></span>Apps</div></div>
+    </div></div>
+  </div>
+
+</div>
+
+<div class="foot">
+  <p><b>What's new vs today's app:</b> a three-source SoH that shows measured / modeled / gauge side by side for confidence; a <b>degradation-model screen</b> that explains the fade as calendar vs cyclic aging from the phone's own logged temperature and charge exposure; real <b>endurance estimates</b> ("lasts for" at three usage levels); and full <b>session logs</b> with efficiency and estimated per-app drain.</p>
+  <p style="margin-top:10px"><b>The simSES angle:</b> the modeled SoH runs a semi-empirical aging model — calendar fade scaling with √time, an Arrhenius temperature factor and a charge-level stress factor, plus cyclic fade from depth-of-discharge and cycle throughput — parameterised by the exposure data the Pixel already records (<span class="mono">swelling_data</span> = hours at each temperature/charge level, and the cycle-count distribution). It's the household-storage degradation approach, pointed at a phone cell.</p>
+  <p style="margin-top:10px"><b>Build order:</b> this mockup → Compose implementation of Health (2a) + model (2b) → Now/endurance (2c) → History/sessions (2d). Nav shown as Health · Now · History · Apps; the current Analytics/Drains content folds into History and Apps.</p>
+</div>
+</body>
+</html>

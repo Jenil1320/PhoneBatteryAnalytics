@@ -1,18 +1,22 @@
 package io.github.jenil1320.cellspan.data
 
 import android.app.AppOpsManager
+import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Build
 import android.os.Process
 
-/** An app ranked by recent foreground time (a proxy for battery use). */
+/** An app ranked by visible foreground time in a window (matches Digital Wellbeing). */
 data class UsageItem(val label: String, val foregroundMs: Long)
 
 /**
- * Top apps by foreground time via [UsageStatsManager]. This is screen time, a
- * proxy for battery use — a normal app cannot read true per-app battery mAh.
- * Requires the user to grant "Usage access" in system settings.
+ * Per-app visible screen time via [UsageStatsManager.queryEvents], pairing each
+ * foreground event with its next background event. This matches how Digital
+ * Wellbeing counts "screen time" — unlike queryUsageStats(INTERVAL_DAILY), which
+ * returns whole calendar-day buckets (over-counting the window) and sums
+ * totalTimeInForeground (a different, larger number). Requires the user to grant
+ * "Usage access". Still a proxy for battery use — not per-app mAh.
  */
 object AppUsage {
 
@@ -29,14 +33,30 @@ object AppUsage {
 
     fun top(context: Context, sinceMs: Long, now: Long, limit: Int = 7): List<UsageItem> = try {
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, sinceMs, now) ?: emptyList()
-        val agg = HashMap<String, Long>()
-        for (s in stats) if (s.totalTimeInForeground > 0) {
-            agg[s.packageName] = (agg[s.packageName] ?: 0L) + s.totalTimeInForeground
+        val events = usm.queryEvents(sinceMs, now)
+        val fg = HashMap<String, Long>()          // package -> accumulated visible ms
+        val openedAt = HashMap<String, Long>()     // package -> last foreground timestamp
+        val e = UsageEvents.Event()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            val pkg = e.packageName ?: continue
+            @Suppress("DEPRECATION")
+            when (e.eventType) {
+                UsageEvents.Event.MOVE_TO_FOREGROUND -> openedAt[pkg] = e.timeStamp
+                UsageEvents.Event.MOVE_TO_BACKGROUND -> {
+                    val start = openedAt.remove(pkg)
+                    if (start != null && e.timeStamp > start) {
+                        fg[pkg] = (fg[pkg] ?: 0L) + (e.timeStamp - start).coerceAtMost(now - start)
+                    }
+                }
+            }
         }
-        agg.remove(context.packageName)
+        // Close out apps still in the foreground at `now`.
+        for ((pkg, start) in openedAt) if (now > start) fg[pkg] = (fg[pkg] ?: 0L) + (now - start)
+        fg.remove(context.packageName)
+
         val pm = context.packageManager
-        agg.entries.sortedByDescending { it.value }.take(limit).map { (pkg, ms) ->
+        fg.entries.filter { it.value > 0 }.sortedByDescending { it.value }.take(limit).map { (pkg, ms) ->
             val label = try {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             } catch (e: Exception) { pkg.substringAfterLast('.') }
