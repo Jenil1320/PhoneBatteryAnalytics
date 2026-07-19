@@ -164,9 +164,11 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
         }
 
         analysis?.let {
+            val firm = it.capacitySource == CapacitySource.GAUGE || it.capacitySource == CapacitySource.SESSION
             Spacer(Modifier.height(16.dp))
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                ConditionPill(it.condition.label, conditionColor(it.condition))
+                if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
+                else ConditionPill("Estimating", Cell.TextMuted)
             }
         }
 
@@ -233,15 +235,30 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                 append(snapshot?.model ?: "Battery"); analysis?.ageDays?.let { append(" · ${Fmt.age(it)}") }
             }, color = Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
         }
+        // "Firm" = a real measurement (fuel gauge or a completed charge session).
+        // Otherwise the value is just the noisy instantaneous estimate, shown as ~approx.
+        val firm = analysis?.let {
+            it.capacitySource == CapacitySource.GAUGE || it.capacitySource == CapacitySource.SESSION
+        } ?: false
         val sohInt = analysis?.sohPct?.toInt() ?: 0
         var target by remember { mutableIntStateOf(0) }
         LaunchedEffect(sohInt) { target = sohInt }
         val shown by animateIntAsState(target, tween(900), label = "sohCount")
         Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.Top) {
-            Text(if (analysis?.sohPct != null) "$shown" else "—", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 104.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                when {
+                    analysis?.sohPct == null -> "—"
+                    firm -> "$shown"
+                    else -> "~$shown"
+                },
+                color = Cell.TextPrimary, fontFamily = Sans, fontSize = 104.sp, fontWeight = FontWeight.SemiBold,
+            )
             Text("%", color = Cell.TextMuted, fontFamily = Sans, fontSize = 32.sp, modifier = Modifier.padding(top = 14.dp))
         }
-        analysis?.let { ConditionPill(it.condition.label, conditionColor(it.condition)) }
+        analysis?.let {
+            if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
+            else ConditionPill("Estimating", Cell.TextMuted)
+        }
         val holds = analysis?.sohPct?.toInt()
         Text(
             when {
@@ -486,8 +503,16 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                 KeyValueRow("Design capacity", analysis?.designCapacityMah?.let { "$it mAh" + if (analysis.designIsFromDatabase) " (typical)" else "" } ?: "—")
                 KeyValueRow("Full charge (est.)", analysis?.currentCapacityMah?.let { "$it mAh" } ?: "—")
                 KeyValueRow("Charge remaining", snapshot?.chargeCounterUah?.let { "${it / 1000} mAh" } ?: "—")
-                KeyValueRow("State of Health", analysis?.sohPct?.let { "${it.toInt()}%" + if (analysis.sohIsEstimated) " (est.)" else "" } ?: "—",
-                    valueColor = analysis?.let { conditionColor(it.condition) } ?: Cell.TextPrimary)
+                KeyValueRow("State of Health", analysis?.sohPct?.let {
+                    val n = it.toInt()
+                    when (analysis.capacitySource) {
+                        CapacitySource.SESSION -> "$n% (measured)"
+                        CapacitySource.ESTIMATE -> "~$n% (estimating)"
+                        else -> "$n%"
+                    }
+                } ?: "—",
+                    valueColor = if (analysis?.capacitySource == CapacitySource.ESTIMATE) Cell.TextMuted
+                    else analysis?.let { conditionColor(it.condition) } ?: Cell.TextPrimary)
                 KeyValueRow("Cycle count", analysis?.cycleCount?.let { "$it" } ?: "not reported")
                 if (snapshot?.manufacturingEpoch != null) KeyValueRow("Manufactured", Fmt.isoDate(snapshot.manufacturingEpoch * 1000))
             }

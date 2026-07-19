@@ -752,8 +752,25 @@ def resolve_name(name: str, uidmap: dict) -> str:
     m2 = re.match(r"Uid\s+(\d+)", name)
     if m2:
         uid = int(m2.group(1))
-        return uidmap.get(uid, SYSTEM_UIDS.get(uid, f"uid {uid}"))
+        # Well-known system UIDs win over any package that happens to share the UID.
+        if uid in SYSTEM_UIDS:
+            return SYSTEM_UIDS[uid]
+        if uid < 10000:
+            return uidmap.get(uid, f"system uid {uid}")
+        return uidmap.get(uid, f"uid {uid}")
     return name
+
+
+def is_system_consumer(name: str) -> bool:
+    """True for OS subsystems and platform UIDs (uid < 10000); False for real apps."""
+    if not name.startswith("Uid"):
+        return True  # named subsystem: Screen, Wi-Fi, Cell standby, Idle, …
+    if re.match(r"Uid\s+u\d+a\d+", name):
+        return False  # u0aNNN → application UID
+    m = re.match(r"Uid\s+(\d+)", name)
+    if m:
+        return int(m.group(1)) < 10000
+    return True
 
 
 def _power_bar(label: str, frac: float, val: float, color: str) -> str:
@@ -1192,8 +1209,8 @@ def cmd_power(args) -> None:
     uidmap = uid_package_map(serial)
     for r in rows:
         r["display"] = resolve_name(r["name"], uidmap) if r["name"].startswith("Uid") else r["name"]
-        # A resolved package name (has a dot) is an app; everything else is system.
-        r["kind"] = "app" if "." in r["display"] else "system"
+        # Classify by the actual UID, not the presence of a dot in the name.
+        r["kind"] = "system" if is_system_consumer(r["name"]) else "app"
     POWER_PATH.write_text(json.dumps(
         {"ts": datetime.now().isoformat(timespec="seconds"),
          "capacity": capacity, "rows": rows}, indent=2), encoding="utf-8")
