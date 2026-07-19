@@ -3,7 +3,7 @@
 package io.github.jenil1320.cellspan.ui.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -14,65 +14,86 @@ import androidx.compose.ui.text.font.FontWeight
 import io.github.jenil1320.cellspan.R
 
 /**
- * Palette from docs/design-directions.html: dark, natural green, calm — with a
- * bit more depth (elevated surfaces, gradients, a soft glow) so it reads as a
- * designed instrument rather than a flat template.
+ * Fresh light palette from palette.svg (Coolors): sage → teal → slate greens with
+ * tan and pink accents. Light surfaces, white cards, and a row of saturated KPI
+ * tiles — the same structure as the reference dashboard.
+ *
+ *   #cad2c5 sage-pale · #84a98c sage · #52796f teal · #354f52 slate
+ *   #2f3e46 charcoal · #583e23 brown · #a7754d tan · #f06c9b pink
  */
 object Cell {
-    val Bg = Color(0xFF0A0C0A)
-    val BgTop = Color(0xFF0F1310)
-    val BgElevated = Color(0xFF12160F)
-    val Surface = Color(0xFF161A14)
-    val SurfaceHi = Color(0xFF1B2018)
-    val Border = Color(0x16FFFFFF)
-    val BorderHi = Color(0x22FFFFFF)
-    val BorderAccent = Color(0x3386BD7A)
+    // Surfaces
+    val Bg = Color(0xFFEAEEE6)          // page background (light sage-gray)
+    val BgTop = Color(0xFFF1F4EE)
+    val BgElevated = Color(0xFFFFFFFF)  // cards
+    val Surface = Color(0xFFFFFFFF)
+    val SurfaceHi = Color(0xFFF4F7F1)
+    val Sidebar = Color(0xFFCAD2C5)     // sage-pale (nav / rails)
 
-    val Accent = Color(0xFF86BD7A)
-    val AccentBright = Color(0xFFA6D89A)
-    val AccentLight = Color(0xFF8EC47E)
-    val AccentDeep = Color(0xFF4F8A45)
-    val AccentSoft = Color(0x2286BD7A)
+    val Border = Color(0x14354F52)      // subtle dark hairline on light
+    val BorderHi = Color(0x24354F52)
+    val BorderAccent = Color(0x3352796F)
 
-    val TextPrimary = Color(0xFFEDEFE9)
-    val TextSecondary = Color(0xFFBAC0B3)
-    val TextStatus = Color(0xFFCFD3CA)
-    val TextMuted = Color(0xFF868D80)
-    val TextFaint = Color(0xFF636A5D)
+    // Greens (primary brand)
+    val Accent = Color(0xFF52796F)      // primary teal-green
+    val AccentBright = Color(0xFF84A98C)
+    val AccentLight = Color(0xFF84A98C)
+    val AccentDeep = Color(0xFF354F52)
+    val AccentSoft = Color(0x2284A98C)
 
-    val Good = Color(0xFF86BD7A)
-    val Warn = Color(0xFFD9B45A)
-    val Bad = Color(0xFFD3705C)
-    val Cool = Color(0xFF6FB6CC)
+    // KPI tile fills (the saturated stat cards) + text that sits on them
+    val TileSage = Color(0xFF84A98C)
+    val TileTeal = Color(0xFF52796F)
+    val TileSlate = Color(0xFF354F52)
+    val TileCharcoal = Color(0xFF2F3E46)
+    val OnTile = Color(0xFFF3F6F1)
+    val OnTileMuted = Color(0xCCEAEFEA)
 
-    val Track = Color(0xFF1E241A)
+    // Text on light surfaces
+    val TextPrimary = Color(0xFF2F3E46)   // charcoal
+    val TextSecondary = Color(0xFF4A5A56)
+    val TextStatus = Color(0xFF52796F)
+    val TextMuted = Color(0xFF77857D)
+    val TextFaint = Color(0xFFA1ABA2)
 
-    val liquid: Brush get() = Brush.verticalGradient(listOf(AccentLight, AccentDeep))
+    // Status / accents
+    val Good = Color(0xFF52796F)
+    val Warn = Color(0xFFA7754D)   // tan
+    val Bad = Color(0xFFB24A3A)    // warm red, harmonised with the browns
+    val Cool = Color(0xFF5B8BA0)   // muted cool tone for temperature
+    val Pink = Color(0xFFF06C9B)   // secondary data series
+    val Tan = Color(0xFFA7754D)
+    val Brown = Color(0xFF583E23)
+
+    val Track = Color(0xFFE3E8DF)  // chart / bar track on light
+    val OrbBase = Color(0xFF2E3D38) // dark well behind the water orb, so light readout stays legible at any fill
+
+    val liquid: Brush get() = Brush.verticalGradient(listOf(AccentLight, Accent))
     fun liquid(top: Color, bottom: Color): Brush = Brush.verticalGradient(listOf(top, bottom))
     val pageBackground: Brush get() = Brush.verticalGradient(listOf(BgTop, Bg))
     val glow: Brush get() = Brush.radialGradient(listOf(AccentSoft, Color.Transparent))
 }
 
-// Real design typefaces (bundled, OFL): Space Grotesk display + IBM Plex Mono data.
-val SpaceGrotesk = FontFamily(
-    Font(R.font.space_grotesk, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
-    Font(R.font.space_grotesk, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
-    Font(R.font.space_grotesk, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
-    Font(R.font.space_grotesk, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
+// Real design typefaces (bundled, OFL): DM Sans display + DM Mono data.
+val DMSans = FontFamily(
+    Font(R.font.dm_sans, FontWeight.Normal, variationSettings = FontVariation.Settings(FontVariation.weight(400))),
+    Font(R.font.dm_sans, FontWeight.Medium, variationSettings = FontVariation.Settings(FontVariation.weight(500))),
+    Font(R.font.dm_sans, FontWeight.SemiBold, variationSettings = FontVariation.Settings(FontVariation.weight(600))),
+    Font(R.font.dm_sans, FontWeight.Bold, variationSettings = FontVariation.Settings(FontVariation.weight(700))),
 )
-val PlexMono = FontFamily(
-    Font(R.font.ibm_plex_mono_regular, FontWeight.Normal),
-    Font(R.font.ibm_plex_mono_medium, FontWeight.Medium),
-    Font(R.font.ibm_plex_mono_semibold, FontWeight.SemiBold),
+val DMMono = FontFamily(
+    Font(R.font.dm_mono_regular, FontWeight.Normal),
+    Font(R.font.dm_mono_medium, FontWeight.Medium),
+    Font(R.font.dm_mono_medium, FontWeight.SemiBold),
 )
 
 // Aliases used across the UI.
-val Sans = SpaceGrotesk
-val Mono = PlexMono
+val Sans = DMSans
+val Mono = DMMono
 
-private val Scheme = darkColorScheme(
+private val Scheme = lightColorScheme(
     primary = Cell.Accent,
-    onPrimary = Cell.Bg,
+    onPrimary = Color.White,
     background = Cell.Bg,
     onBackground = Cell.TextPrimary,
     surface = Cell.Surface,

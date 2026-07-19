@@ -202,6 +202,61 @@ class HistoryStore(context: Context) :
         }
 
     /**
+     * Serialise every long-term table to JSON for the user to save externally, so the
+     * history survives an uninstall or device change (all these tables are kept forever
+     * on-device; only the high-resolution soc_log is pruned). One self-describing object
+     * with an array per table — trivially parseable months or years later.
+     */
+    fun exportJson(nowMs: Long): String {
+        val db = readableDatabase
+        fun num(c: android.database.Cursor, i: Int) = if (c.isNull(i)) "null" else c.getString(i)
+        val sb = StringBuilder()
+        sb.append("{\n")
+        sb.append("\"app\":\"cellspan\",\"schema\":$DB_VERSION,\"exported_ms\":$nowMs,\n")
+
+        sb.append("\"samples\":[")
+        db.rawQuery("SELECT ts,soh,cycles,capacity_mah,level,temp_c FROM samples ORDER BY ts", null).use { c ->
+            var first = true
+            while (c.moveToNext()) {
+                if (!first) sb.append(","); first = false
+                sb.append("{\"ts\":${c.getLong(0)},\"soh\":${num(c, 1)},\"cycles\":${num(c, 2)}," +
+                    "\"capacity_mah\":${num(c, 3)},\"level\":${c.getInt(4)},\"temp_c\":${num(c, 5)}}")
+            }
+        }
+        sb.append("],\n\"daily_vitals\":[")
+        db.rawQuery("SELECT day,temp_min,temp_max,temp_sum,temp_n,volt_sum,volt_n,curr_sum,curr_n,cycles FROM daily_vitals ORDER BY day", null).use { c ->
+            var first = true
+            while (c.moveToNext()) {
+                if (!first) sb.append(","); first = false
+                val tn = c.getInt(4); val vn = c.getInt(6); val cn = c.getInt(8)
+                val tAvg = if (tn > 0) (c.getDouble(3) / tn).toString() else "null"
+                val vAvg = if (vn > 0) (c.getDouble(5) / vn).toString() else "null"
+                val cAvg = if (cn > 0) (c.getDouble(7) / cn).toString() else "null"
+                sb.append("{\"day\":\"${c.getString(0)}\",\"temp_min\":${num(c, 1)},\"temp_max\":${num(c, 2)}," +
+                    "\"temp_avg\":$tAvg,\"volt_avg\":$vAvg,\"curr_avg\":$cAvg,\"cycles\":${num(c, 9)}}")
+            }
+        }
+        sb.append("],\n\"daily_usage\":[")
+        db.rawQuery("SELECT day,discharged FROM daily_usage ORDER BY day", null).use { c ->
+            var first = true
+            while (c.moveToNext()) {
+                if (!first) sb.append(","); first = false
+                sb.append("{\"day\":\"${c.getString(0)}\",\"discharged_pct\":${c.getDouble(1)}}")
+            }
+        }
+        sb.append("],\n\"capacity_sessions\":[")
+        db.rawQuery("SELECT ts,start_level,end_level,measured_mah FROM capacity_sessions ORDER BY ts", null).use { c ->
+            var first = true
+            while (c.moveToNext()) {
+                if (!first) sb.append(","); first = false
+                sb.append("{\"ts\":${c.getLong(0)},\"start_level\":${num(c, 1)},\"end_level\":${num(c, 2)},\"measured_mah\":${c.getInt(3)}}")
+            }
+        }
+        sb.append("]\n}")
+        return sb.toString()
+    }
+
+    /**
      * Fold one live reading into its calendar day's running aggregates (min/max/mean
      * temperature, mean voltage, mean current, latest cycle count). Uses INSERT-OR-IGNORE
      * then UPDATE so it stays portable to API 26 (no SQLite UPSERT before API 30).

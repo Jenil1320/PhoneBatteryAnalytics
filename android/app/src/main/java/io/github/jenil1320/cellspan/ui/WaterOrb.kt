@@ -69,7 +69,7 @@ fun WaterOrb(
                 addOval(Rect(c.x - r, c.y - r, c.x + r, c.y + r))
             }
             clipPath(circle) {
-                drawCircle(Cell.BgElevated, r, c)
+                drawCircle(Cell.OrbBase, r, c)
                 // Surface y: full at top when fill=1, at bottom when fill=0.
                 val level = (c.y - r) + 2 * r * (1f - fill)
                 val amp = (d * 0.05f).coerceAtLeast(3f)

@@ -86,7 +86,7 @@ object BatteryAnalytics {
      * than the instantaneous estimate.
      */
     fun measuredCapacityMah(
-        startChargeUah: Long, endChargeUah: Long, startLevel: Int, endLevel: Int, minGain: Int = 20,
+        startChargeUah: Long, endChargeUah: Long, startLevel: Int, endLevel: Int, minGain: Int = 40,
     ): Int? {
         val dLevel = endLevel - startLevel
         if (dLevel < minGain) return null

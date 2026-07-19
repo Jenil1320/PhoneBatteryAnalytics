@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +42,18 @@ import io.github.jenil1320.cellspan.data.SocPoint
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.Mono
 import io.github.jenil1320.cellspan.ui.theme.Sans
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import io.github.jenil1320.cellspan.data.HistoryStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -83,8 +96,8 @@ private fun tempColor(b: BatteryAnalytics.TempBand) = when (b) {
     BatteryAnalytics.TempBand.UNKNOWN -> Cell.TextMuted
 }
 private fun orbColors(level: Int): Pair<Color, Color> = when {
-    level <= 15 -> Cell.Bad to Color(0xFF6E2F29)
-    level <= 30 -> Cell.Warn to Color(0xFF7A5C28)
+    level <= 15 -> Cell.Bad to Color(0xFF7E2F24)
+    level <= 30 -> Cell.Warn to Color(0xFF6E4A2A)
     else -> Cell.AccentLight to Cell.AccentDeep
 }
 
@@ -126,10 +139,10 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
                 WaterOrb(fraction = level / 100f, diameter = 210.dp, top = top, bottom = bottom) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Row(verticalAlignment = Alignment.Top) {
-                            Text("$level", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 60.sp, fontWeight = FontWeight.SemiBold)
-                            Text("%", color = Cell.TextStatus, fontSize = 20.sp, modifier = Modifier.padding(top = 10.dp))
+                            Text("$level", color = Cell.OnTile, fontFamily = Sans, fontSize = 60.sp, fontWeight = FontWeight.Bold)
+                            Text("%", color = Cell.OnTileMuted, fontSize = 20.sp, modifier = Modifier.padding(top = 10.dp))
                         }
-                        Text(statusLine.uppercase(), color = Cell.TextStatus, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.2.sp)
+                        Text(statusLine.uppercase(), color = Cell.OnTileMuted, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.2.sp)
                     }
                 }
             }
@@ -239,20 +252,37 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
         var target by remember { mutableIntStateOf(0) }
         LaunchedEffect(sohInt) { target = sohInt }
         val shown by animateIntAsState(target, tween(900), label = "sohCount")
-        Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.Top) {
-            Text(
-                when {
-                    analysis?.sohPct == null -> "—"
-                    firm -> "$shown"
-                    else -> "~$shown"
-                },
-                color = Cell.TextPrimary, fontFamily = Sans, fontSize = 104.sp, fontWeight = FontWeight.SemiBold,
-            )
-            Text("%", color = Cell.TextMuted, fontFamily = Sans, fontSize = 32.sp, modifier = Modifier.padding(top = 14.dp))
-        }
-        analysis?.let {
-            if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
-            else ConditionPill("Estimating", Cell.TextMuted)
+        Row(
+            Modifier.fillMaxWidth().padding(top = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        when {
+                            analysis?.sohPct == null -> "—"
+                            firm -> "$shown"
+                            else -> "~$shown"
+                        },
+                        color = Cell.TextPrimary, fontFamily = Sans, fontSize = 68.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, softWrap = false,
+                    )
+                    Text("%", color = Cell.TextMuted, fontFamily = Sans, fontSize = 24.sp, maxLines = 1,
+                        modifier = Modifier.padding(top = 10.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                analysis?.let {
+                    if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
+                    else ConditionPill("Estimating", Cell.TextMuted)
+                }
+            }
+            Column(Modifier.width(126.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KpiTile("Cycles", analysis?.cycleCount?.let { "$it" } ?: "—",
+                    if ((analysis?.cycleCount ?: 0) >= 800) Cell.Bad else Cell.TileSlate, Modifier.fillMaxWidth())
+                KpiTile("Capacity", analysis?.currentCapacityMah?.let { "$it" } ?: "—", Cell.TileTeal, Modifier.fillMaxWidth(),
+                    sub = analysis?.designCapacityMah?.let { "of $it mAh" })
+            }
         }
         val holds = analysis?.sohPct?.toInt()
         Text(
@@ -265,20 +295,14 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                 else ->
                     "Estimated at ~$holds% from a single reading — charge past 20% a few times and Cellspan will measure it precisely."
             },
-            color = Cell.TextSecondary, fontSize = 14.5.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 16.dp),
+            color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 16.dp),
         )
         val pts = chartPoints(history) { it.sohPct }
         if (pts.isNotEmpty()) {
-            Spacer(Modifier.height(24.dp)); SectionLabel("Capacity trend"); Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(18.dp)); SectionLabel("Capacity trend"); Spacer(Modifier.height(10.dp))
             TimeSeriesChart(pts, yFormat = { "${it.toInt()}%" },
                 xStart = Fmt.isoDate(history.firstOrNull { it.sohPct != null }?.timestampMs), xEnd = "now",
                 threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%")
-        }
-        Spacer(Modifier.height(24.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            StatTile(analysis?.currentCapacityMah?.let { "$it" } ?: "—", "mAh now")
-            StatTile(analysis?.designCapacityMah?.let { "$it" } ?: "—", "mAh new")
-            StatTile(analysis?.cycleCount?.let { "$it" } ?: "—", "cycles", color = if ((analysis?.cycleCount ?: 0) >= 800) Cell.Bad else Cell.TextPrimary)
         }
 
         // Measured vs modeled: is this cell aging normally for its cycle count?
@@ -297,9 +321,9 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         VitalTile("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub, Modifier.weight(1f),
-                            accent = analysis.let { conditionColor(it.condition) })
+                            accent = analysis.let { conditionColor(it.condition) }, bg = Cell.SurfaceHi)
                         VitalTile("Modeled", "${modeled.toInt()}%", "typical wear", Modifier.weight(1f),
-                            accent = Cell.TextSecondary)
+                            accent = Cell.TextSecondary, bg = Cell.SurfaceHi)
                     }
                     if (measured != null) {
                         val delta = measured - modeled
@@ -479,6 +503,43 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                     Spacer(Modifier.height(10.dp))
                     Text("Exact capacity, manufacture date and the charge/temperature history unlock automatically with root or an ADB helper (Shizuku).",
                         color = Cell.TextFaint, fontSize = 12.sp, lineHeight = 18.sp)
+                }
+            }
+        }
+
+        // Data cadence + export so history survives an uninstall / new phone.
+        val ctx = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+            if (uri != null) scope.launch(Dispatchers.IO) {
+                val ok = runCatching {
+                    val json = HistoryStore(ctx).use { it.exportJson(System.currentTimeMillis()) }
+                    val stream = ctx.contentResolver.openOutputStream(uri) ?: error("no output stream")
+                    stream.use { os -> os.write(json.toByteArray()) }
+                }.isSuccess
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, if (ok) "History exported" else "Export failed — try another location", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        SurfaceCard {
+            Column {
+                SectionLabel("Data & history")
+                Spacer(Modifier.height(8.dp))
+                Text("Cellspan records a health sample about every 6 hours and each time you open the app, plus a daily summary of temperature, voltage, current and cycles. Live vitals refresh about once a minute while the app is open.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Health samples, daily summaries, charge sessions and daily usage are kept on the phone indefinitely for long-term trends; only the 3-day high-resolution live log is trimmed. Export saves it all to a JSON file so your history survives an uninstall or a new phone.",
+                    color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
+                Spacer(Modifier.height(14.dp))
+                Box(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
+                        .border(1.dp, Cell.BorderAccent, RoundedCornerShape(10.dp))
+                        .clickable { exporter.launch("cellspan-history.json") }
+                        .padding(horizontal = 16.dp, vertical = 11.dp),
+                ) {
+                    Text("Export history (JSON)", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
                 }
             }
         }

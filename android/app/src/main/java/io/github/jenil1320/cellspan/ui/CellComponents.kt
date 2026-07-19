@@ -18,22 +18,42 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.Mono
+import io.github.jenil1320.cellspan.ui.theme.Sans
 
 @Composable
 fun SurfaceCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
         modifier
+            .shadow(5.dp, RoundedCornerShape(20.dp), spotColor = Color(0x18354F52), ambientColor = Color(0x12354F52))
             .clip(RoundedCornerShape(20.dp))
             .background(Cell.Surface)
             .border(1.dp, Cell.Border, RoundedCornerShape(20.dp))
-            .padding(18.dp)
+            .padding(16.dp)
     ) { content() }
+}
+
+/** A saturated KPI stat card — the coloured tiles from the reference dashboard. */
+@Composable
+fun KpiTile(label: String, value: String, fill: Color, modifier: Modifier = Modifier, sub: String? = null) {
+    Column(
+        modifier
+            .shadow(4.dp, RoundedCornerShape(18.dp), spotColor = Color(0x22354F52), ambientColor = Color(0x14354F52))
+            .clip(RoundedCornerShape(18.dp))
+            .background(fill)
+            .padding(horizontal = 15.dp, vertical = 14.dp)
+    ) {
+        Text(label.uppercase(), color = Cell.OnTileMuted, fontFamily = Mono, fontSize = 9.5.sp, letterSpacing = 0.8.sp)
+        Text(value, color = Cell.OnTile, fontFamily = Sans, fontSize = 25.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 5.dp))
+        if (sub != null) Text(sub, color = Cell.OnTileMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+    }
 }
 
 @Composable
@@ -60,21 +80,14 @@ fun ConditionPill(label: String, color: Color) {
     }
 }
 
-@Composable
-fun StatTile(value: String, label: String, modifier: Modifier = Modifier, color: Color = Cell.TextPrimary) {
-    Column(modifier) {
-        Text(value, color = color, fontFamily = Mono, fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Text(label.uppercase(), color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.5.sp, letterSpacing = 0.6.sp)
-    }
-}
-
 /** A bordered vitals tile: label on top, big value, optional sub-line. */
 @Composable
-fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier = Modifier, accent: Color = Cell.TextPrimary) {
+fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier = Modifier, accent: Color = Cell.TextPrimary, bg: Color = Cell.Surface) {
     Box(
         modifier
+            .shadow(3.dp, RoundedCornerShape(16.dp), spotColor = Color(0x16354F52), ambientColor = Color(0x0E354F52))
             .clip(RoundedCornerShape(16.dp))
-            .background(Cell.BgElevated)
+            .background(bg)
             .border(1.dp, Cell.Border, RoundedCornerShape(16.dp))
             .padding(14.dp)
     ) {

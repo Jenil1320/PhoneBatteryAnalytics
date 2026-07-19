@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,6 +35,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -50,6 +52,8 @@ import kotlinx.coroutines.delay
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Light theme → dark status-bar icons so the clock/battery stay legible.
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
         setContent { CellspanTheme { AppRoot() } }
     }
 }
@@ -94,32 +98,32 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
 
 @Composable
 private fun CellNavBar(current: Tab, onSelect: (Tab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(Cell.Bg)
-            .navigationBarsPadding()
-            .padding(top = 12.dp, bottom = 12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-        Tab.entries.forEach { t ->
-            val active = t == current
-            val c = if (active) Cell.Accent else Cell.TextFaint
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(7.dp),
-                modifier = Modifier.clickable { onSelect(t) }.padding(8.dp),
-            ) {
-                Box(
-                    Modifier
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .then(
-                            if (active) Modifier.background(c)
-                            else Modifier.border(1.5.dp, c, CircleShape)
-                        )
-                )
-                Text(t.label, color = c, fontSize = 10.5.sp, fontWeight = FontWeight.Medium)
+    Column(Modifier.fillMaxWidth().background(Cell.Surface)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Cell.Border))
+        Row(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(top = 10.dp, bottom = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            Tab.entries.forEach { t ->
+                val active = t == current
+                val c = if (active) Cell.Accent else Cell.TextFaint
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.clickable { onSelect(t) }.padding(8.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .then(
+                                if (active) Modifier.background(c)
+                                else Modifier.border(1.5.dp, c, CircleShape)
+                            )
+                    )
+                    Text(t.label, color = c, fontSize = 10.5.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium)
+                }
             }
         }
     }
