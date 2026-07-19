@@ -9,6 +9,7 @@ import io.github.jenil1320.cellspan.data.BatteryReader
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.HistoryStore
 import io.github.jenil1320.cellspan.data.HistoryPoint
+import io.github.jenil1320.cellspan.data.SocPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +25,10 @@ data class UiState(
     val analysis: Analysis? = null,
     val history: List<HistoryPoint> = emptyList(),
     val dailyUsage: List<Pair<String, Double>> = emptyList(),
+    val socLog: List<SocPoint> = emptyList(),
 )
+
+private const val SOC_WINDOW_MS = 3L * 24 * 60 * 60 * 1000
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -41,6 +45,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
             var history: List<HistoryPoint> = emptyList()
             var usage: List<Pair<String, Double>> = emptyList()
+            var socLog: List<SocPoint> = emptyList()
             try {
                 HistoryStore(getApplication()).use { store ->
                     val last = store.lastSampleMs()
@@ -53,16 +58,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         store.insert(snapshot, analysis)
                     }
+                    store.ensureDay(dayKey(snapshot.timestampMs))
+                    store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
+                        mv(snapshot.voltageV), ma(snapshot.currentUa))
                     history = store.recent()
                     usage = store.dailyUsage(7)
+                    socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
                 }
             } catch (e: Exception) {
                 // history is best-effort; never let it crash the app
             }
-            _state.value = UiState(false, snapshot, analysis, history, usage)
+            _state.value = UiState(false, snapshot, analysis, history, usage, socLog)
+        }
+    }
+
+    /** Light live refresh (every few seconds while the app is open): updates the
+     *  live vitals and the SoC log without re-inserting a health sample. */
+    fun tick() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val snapshot = BatteryReader.read(getApplication())
+            val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
+            val prevLevel = _state.value.snapshot?.levelPct
+            var socLog = _state.value.socLog
+            var usage = _state.value.dailyUsage
+            try {
+                HistoryStore(getApplication()).use { store ->
+                    // Accrue fine-grained discharge between live ticks.
+                    if (prevLevel != null && snapshot.levelPct < prevLevel) {
+                        store.addDischarge(dayKey(snapshot.timestampMs), (prevLevel - snapshot.levelPct).toDouble())
+                    }
+                    store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
+                        mv(snapshot.voltageV), ma(snapshot.currentUa))
+                    socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
+                    usage = store.dailyUsage(7)
+                }
+            } catch (e: Exception) { /* ignore */ }
+            _state.value = _state.value.copy(snapshot = snapshot, analysis = analysis, socLog = socLog, dailyUsage = usage)
         }
     }
 
     private fun dayKey(ms: Long): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(ms))
+
+    private fun mv(v: Float?): Int? = v?.let { (it * 1000).toInt() }
+    private fun ma(ua: Long?): Int? = ua?.let { (it / 1000).toInt() }
 }

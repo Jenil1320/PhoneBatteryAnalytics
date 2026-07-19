@@ -158,6 +158,16 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun levelDistribution_bucketsIntoTenBands() {
+        val d = BatteryAnalytics.levelDistribution(listOf(5, 12, 15, 100, 0, 99))
+        assertEquals(10, d.size)
+        assertEquals(2, d[0])   // 5 and 0
+        assertEquals(2, d[1])   // 12 and 15
+        assertEquals(2, d[9])   // 100 (clamped) and 99
+        assertEquals(6, d.sum())
+    }
+
+    @Test
     fun parseCycleCounts_readsBands() {
         val bands = BatteryAnalytics.parseCycleCounts("2867 8354 11070 11313 11102 10334 9503 8209 6563 3748")
         assertEquals(10, bands!!.size)

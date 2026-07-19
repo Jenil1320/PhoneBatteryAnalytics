@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -88,13 +90,32 @@ fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier
 }
 
 @Composable
-fun KeyValueRow(key: String, value: String) {
+fun KeyValueRow(key: String, value: String, valueColor: Color = Cell.TextPrimary) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(key, color = Cell.TextMuted, fontSize = 13.sp)
-        Text(value, color = Cell.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(value, color = valueColor, fontFamily = Mono, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Horizontal proportion bar with a right-aligned label and value. */
+@Composable
+fun HBar(label: String, fraction: Float, valueText: String, barColor: Color = Cell.Accent) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(label, color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp,
+            modifier = Modifier.width(58.dp))
+        Box(Modifier.weight(1f).height(13.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Track)) {
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(13.dp)
+                .clip(RoundedCornerShape(4.dp)).background(barColor))
+        }
+        Text(valueText, color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp,
+            modifier = Modifier.width(38.dp))
     }
 }

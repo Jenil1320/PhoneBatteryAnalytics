@@ -173,6 +173,13 @@ object BatteryAnalytics {
     /** Equivalent full cycles represented by a day's discharged percentage points. */
     fun equivalentCycles(dischargedPct: Double): Double = dischargedPct / 100.0
 
+    /** Distribute charge-level samples into ten 10%-wide bands (0–10 … 90–100). */
+    fun levelDistribution(levels: List<Int>): List<Int> {
+        val bands = IntArray(10)
+        for (l in levels) bands[(l.coerceIn(0, 100) / 10).coerceAtMost(9)]++
+        return bands.toList()
+    }
+
     /** Parse the fuel gauge's `cycle_counts` string into charge-level bands. */
     fun parseCycleCounts(raw: String?): List<Int>? {
         if (raw.isNullOrBlank()) return null

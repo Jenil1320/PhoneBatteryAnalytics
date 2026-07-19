@@ -14,10 +14,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,17 +29,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.jenil1320.cellspan.ui.AnalyticsScreen
 import io.github.jenil1320.cellspan.ui.DiagnoseScreen
+import io.github.jenil1320.cellspan.ui.DrainsScreen
 import io.github.jenil1320.cellspan.ui.HealthScreen
 import io.github.jenil1320.cellspan.ui.MainViewModel
 import io.github.jenil1320.cellspan.ui.NowScreen
-import io.github.jenil1320.cellspan.ui.TrendsScreen
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.CellspanTheme
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,7 +52,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Tab(val label: String) {
-    NOW("Now"), HEALTH("Health"), TRENDS("Trends"), DIAGNOSE("Diagnose")
+    NOW("Now"), HEALTH("Health"), ANALYTICS("Analytics"), DRAINS("Drains"), DIAGNOSE("Diagnose")
 }
 
 @Composable
@@ -54,15 +60,24 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.NOW) }
 
+    // Live pulse: refresh vitals + the SoC log while the app is open.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(20_000)
+            vm.tick()
+        }
+    }
+
     Scaffold(
-        containerColor = Cell.Bg,
+        containerColor = Color.Transparent,
         bottomBar = { CellNavBar(tab) { tab = it } },
     ) { padding ->
-        Box(Modifier.padding(padding)) {
+        Box(Modifier.fillMaxSize().background(Cell.pageBackground).padding(padding)) {
             when (tab) {
-                Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage)
+                Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage, state.socLog)
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history)
-                Tab.TRENDS -> TrendsScreen(state.analysis, state.history, state.dailyUsage)
+                Tab.ANALYTICS -> AnalyticsScreen(state.analysis, state.history, state.dailyUsage, state.socLog)
+                Tab.DRAINS -> DrainsScreen()
                 Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis)
             }
         }
