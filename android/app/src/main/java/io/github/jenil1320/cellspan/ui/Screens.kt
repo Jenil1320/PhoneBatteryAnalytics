@@ -440,7 +440,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         SourceCol("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub,
                             conditionColor(analysis.condition), Modifier.weight(1f))
                         VDivider()
-                        SourceCol("Modeled", "${modeled.toInt()}%", "simSES", Cell.Cool, Modifier.weight(1f))
+                        SourceCol("Modeled", "${modeled.toInt()}%", "typical", Cell.Cool, Modifier.weight(1f))
                         VDivider()
                         SourceCol("Gauge", if (gaugeAvail) (measured?.let { "${it.toInt()}%" } ?: "—") else "—",
                             if (gaugeAvail) "fuel IC" else "needs root", Cell.TextSecondary, Modifier.weight(1f))
@@ -459,7 +459,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         )
                     }
                     Text(
-                        "Modeled from a semi-empirical NMC aging model (Schmalstieg / SimSES). Treat it as a typical reference, not a manufacturer figure.",
+                        "A typical wear estimate for this many charge cycles, based on published lithium-battery research. It is a reference, not a manufacturer figure.",
                         color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -485,8 +485,8 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         }
                     }
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Calendar · age + heat", color = Cell.TextFaint, fontSize = 11.sp)
-                        Text("Cyclic · throughput", color = Cell.TextFaint, fontSize = 11.sp)
+                        Text("Age + heat", color = Cell.TextFaint, fontSize = 11.sp)
+                        Text("From charging", color = Cell.TextFaint, fontSize = 11.sp)
                     }
                     Spacer(Modifier.height(10.dp))
                     KeyValueRow("From charge cycles", String.format(Locale.US, "−%.1f pts", cyc))
@@ -497,8 +497,8 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     }
                     Text(
                         if (analysis.modeledHasCalendar)
-                            "Charge cycles wear the electrodes; time and heat grow the internal film. Both are modeled here."
-                        else "Cycle wear is modeled from your cycle count. Calendar wear (age + heat) needs the manufacture date, which stock Android hides from apps.",
+                            "Charging wears the battery. Age and heat wear it too. Cellspan shows how much comes from each."
+                        else "This is the wear from charging. Wear from age and heat needs the battery's make date, which Android hides from apps.",
                         color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -593,7 +593,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
 
 // ── Diagnose ─────────────────────────────────────────────────────────────────
 @Composable
-fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
+fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?, onOpenInfo: (String) -> Unit = {}) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Text("Diagnose", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
 
@@ -735,6 +735,19 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                 ) {
                     Text("Export battery data", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
                 }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        SurfaceCard {
+            Column {
+                SectionLabel("Learn & privacy")
+                Spacer(Modifier.height(4.dp))
+                NavRow("Battery basics", "What the numbers mean, in plain words",
+                    onClick = { onOpenInfo("basics") }, metric = Metric.HEALTH)
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Cell.Border))
+                NavRow("Privacy policy", "What Cellspan does with your data",
+                    onClick = { onOpenInfo("privacy") }, metric = Metric.SOC)
             }
         }
         Spacer(Modifier.height(80.dp))

@@ -2,6 +2,7 @@ package io.github.jenil1320.cellspan
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,11 +40,13 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.jenil1320.cellspan.ui.BatteryBasicsScreen
 import io.github.jenil1320.cellspan.ui.DiagnoseScreen
 import io.github.jenil1320.cellspan.ui.HealthScreen
 import io.github.jenil1320.cellspan.ui.HistoryScreen
 import io.github.jenil1320.cellspan.ui.MainViewModel
 import io.github.jenil1320.cellspan.ui.NowScreen
+import io.github.jenil1320.cellspan.ui.PrivacyPolicyScreen
 import io.github.jenil1320.cellspan.ui.TrendsScreen
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.CellspanTheme
@@ -66,6 +69,8 @@ private enum class Tab(val label: String) {
 private fun AppRoot(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.NOW) }
+    // Full-screen info page overlaid on top of the tabs ("basics" | "privacy" | null).
+    var info by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Live pulse: refresh vitals + the SoC log ONLY while the app is foreground
     // (repeatOnLifecycle cancels the loop when backgrounded, so it never polls
@@ -80,6 +85,18 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
         }
     }
 
+    // An open info page takes over the whole screen (with a back control + system back).
+    if (info != null) {
+        BackHandler { info = null }
+        Box(Modifier.fillMaxSize().background(Cell.pageBackground)) {
+            when (info) {
+                "basics" -> BatteryBasicsScreen(onBack = { info = null })
+                "privacy" -> PrivacyPolicyScreen(onBack = { info = null })
+            }
+        }
+        return
+    }
+
     Scaffold(
         containerColor = Color.Transparent,
         bottomBar = { CellNavBar(tab) { tab = it } },
@@ -90,7 +107,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast)
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
                 Tab.HISTORY -> HistoryScreen(state.sessions)
-                Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis)
+                Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis, onOpenInfo = { info = it })
             }
         }
     }
