@@ -105,15 +105,18 @@ object BatteryAnalytics {
         sessionCount: Int = 0,
         avgTempC: Double? = null,
         avgDoD: Double? = null,
+        designOverrideMah: Int? = null,
     ): Analysis {
-        // Design capacity, best source first: exact fuel-gauge value → the ROM's
-        // PowerProfile (device-reported, works on almost any phone) → our published
-        // table of typical capacities. Only the table is a generic "typical" figure.
+        // Design capacity, best source first: a user-set override → the exact
+        // fuel-gauge value → the ROM's PowerProfile (device-reported, works on almost
+        // any phone) → our published table of typical capacities. Only the table is a
+        // generic "typical" figure; the override is the user's own device figure.
         val designFromSysfs = s.chargeFullDesignUah?.let { (it / 1000.0).toInt() }
         val designFromProfile = s.designCapacityFromProfileMah?.takeIf { it > 0 }
         val designFromTable = DeviceCapacityTable.designCapacityMah(s.model)
-        val designMah = designFromSysfs ?: designFromProfile ?: designFromTable
-        val designIsFromDatabase =
+        val designMah = designOverrideMah?.takeIf { it > 0 }
+            ?: designFromSysfs ?: designFromProfile ?: designFromTable
+        val designIsFromDatabase = designOverrideMah == null &&
             designFromSysfs == null && designFromProfile == null && designFromTable != null
 
         // Current full-charge capacity, best source first:

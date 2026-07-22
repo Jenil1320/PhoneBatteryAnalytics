@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,8 +47,10 @@ import io.github.jenil1320.cellspan.ui.HealthScreen
 import io.github.jenil1320.cellspan.ui.HistoryScreen
 import io.github.jenil1320.cellspan.ui.MainViewModel
 import io.github.jenil1320.cellspan.ui.NowScreen
+import io.github.jenil1320.cellspan.ui.OnboardingScreen
 import io.github.jenil1320.cellspan.ui.PrivacyPolicyScreen
 import io.github.jenil1320.cellspan.ui.TrendsScreen
+import io.github.jenil1320.cellspan.data.AppPrefs
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.CellspanTheme
 import kotlinx.coroutines.delay
@@ -71,6 +74,14 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     var tab by rememberSaveable { mutableStateOf(Tab.NOW) }
     // Full-screen info page overlaid on top of the tabs ("basics" | "privacy" | null).
     var info by rememberSaveable { mutableStateOf<String?>(null) }
+    val ctx = LocalContext.current
+
+    // First run: show the onboarding flow until the user finishes it.
+    var onboarded by rememberSaveable { mutableStateOf(AppPrefs.isOnboarded(ctx)) }
+    if (!onboarded) {
+        OnboardingScreen(onDone = { AppPrefs.setOnboarded(ctx); onboarded = true })
+        return
+    }
 
     // Live pulse: refresh vitals + the SoC log ONLY while the app is foreground
     // (repeatOnLifecycle cancels the loop when backgrounded, so it never polls
@@ -107,7 +118,11 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast)
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
                 Tab.HISTORY -> HistoryScreen(state.sessions)
-                Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis, onOpenInfo = { info = it })
+                Tab.DIAGNOSE -> DiagnoseScreen(
+                    state.snapshot, state.analysis,
+                    onOpenInfo = { info = it },
+                    onSetDesignCapacity = { mah -> AppPrefs.setDesignOverrideMah(ctx, mah); vm.refresh() },
+                )
             }
         }
     }

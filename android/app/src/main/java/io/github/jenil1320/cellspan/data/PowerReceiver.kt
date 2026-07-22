@@ -35,6 +35,15 @@ class PowerReceiver : BroadcastReceiver() {
                 }
                 SegmentTracker.begin(app, nowTs, snap.levelPct, cc, nowCharging)
 
+                // Charge alarm: start the polling loop on plug-in (if a target is set),
+                // stop it and clear any notification on unplug.
+                if (nowCharging) {
+                    if (AppPrefs.chargeAlarmTarget(app) > 0) ChargeAlarm.scheduleCheck(app, 0)
+                } else {
+                    ChargeAlarm.cancel(app)
+                    ChargeAlarm.cancelNotification(app)
+                }
+
                 // Session-based capacity measurement (needs the fuel-gauge charge counter).
                 if (cc != null) when (action) {
                     Intent.ACTION_POWER_CONNECTED ->

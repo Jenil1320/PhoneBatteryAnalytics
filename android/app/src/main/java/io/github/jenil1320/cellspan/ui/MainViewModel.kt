@@ -9,6 +9,7 @@ import io.github.jenil1320.cellspan.analytics.CapacitySource
 import io.github.jenil1320.cellspan.analytics.DegradationModel
 import io.github.jenil1320.cellspan.analytics.SohForecaster
 import io.github.jenil1320.cellspan.data.AccrualCursor
+import io.github.jenil1320.cellspan.data.AppPrefs
 import io.github.jenil1320.cellspan.data.BatteryReader
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.DailyVital
@@ -67,7 +68,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // degradation model the daily-average temperature.
                     analysis = BatteryAnalytics.analyze(
                         snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
-                        avgTemp(vitals))
+                        avgTemp(vitals),
+                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()))
                     val last = store.lastSampleMs()
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
                         store.insert(snapshot, analysis)
@@ -107,7 +109,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     vitals = store.dailyVitals(TREND_DAYS)
                     analysis = BatteryAnalytics.analyze(
                         snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
-                        avgTemp(vitals))
+                        avgTemp(vitals),
+                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()))
                     accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))

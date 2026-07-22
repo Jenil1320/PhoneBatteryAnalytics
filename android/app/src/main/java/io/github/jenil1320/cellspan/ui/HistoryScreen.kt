@@ -207,7 +207,7 @@ private fun SessionCard(s: Session) {
                 Box(Modifier.weight((hi - lo).coerceAtLeast(1).toFloat()).fillMaxHeight().background(accent))
                 if (hi < 100) Box(Modifier.weight((100 - hi).toFloat()))
             }
-            Text("Ended ${Fmt.time(s.endMs)} · wear ${String.format(java.util.Locale.US, "%.2f", wear)} cyc",
+            Text("${if (up) "Added" else "Used"} ${String.format(java.util.Locale.US, "%.2f", wear)} cyc of wear · ended ${Fmt.time(s.endMs)}",
                 color = Cell.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
         }
     }

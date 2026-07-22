@@ -20,7 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jenil1320.cellspan.analytics.Analysis
@@ -41,7 +46,9 @@ import io.github.jenil1320.cellspan.analytics.CapacitySource
 import io.github.jenil1320.cellspan.analytics.Condition
 import io.github.jenil1320.cellspan.analytics.DrainForecaster
 import io.github.jenil1320.cellspan.analytics.SohForecaster
+import io.github.jenil1320.cellspan.data.AppPrefs
 import io.github.jenil1320.cellspan.data.BatterySnapshot
+import io.github.jenil1320.cellspan.data.ChargeAlarm
 import io.github.jenil1320.cellspan.data.HistoryPoint
 import io.github.jenil1320.cellspan.data.SocPoint
 import io.github.jenil1320.cellspan.ui.theme.Cell
@@ -224,6 +231,9 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
                 else ConditionPill("Estimating", Cell.TextMuted)
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+        ChargeAlarmCard(status)
 
         // "Lasts for" at light / normal / heavy use (mockup 2c), scaled off the recent drain.
         if (status == "Discharging" && dischargeRate != null && dischargeRate > 0.0) {
@@ -593,7 +603,20 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
 
 // ── Diagnose ─────────────────────────────────────────────────────────────────
 @Composable
-fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?, onOpenInfo: (String) -> Unit = {}) {
+fun DiagnoseScreen(
+    snapshot: BatterySnapshot?,
+    analysis: Analysis?,
+    onOpenInfo: (String) -> Unit = {},
+    onSetDesignCapacity: (Int?) -> Unit = {},
+) {
+    var showDesignDialog by remember { mutableStateOf(false) }
+    if (showDesignDialog) {
+        DesignCapacityDialog(
+            current = analysis?.designCapacityMah,
+            onDismiss = { showDesignDialog = false },
+            onSave = { onSetDesignCapacity(it); showDesignDialog = false },
+        )
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Text("Diagnose", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
 
@@ -630,6 +653,9 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?, onOpenInfo: 
                     else analysis?.let { conditionColor(it.condition) } ?: Cell.TextPrimary)
                 KeyValueRow("Cycle count", analysis?.cycleCount?.let { "$it" } ?: "not reported")
                 if (snapshot?.manufacturingEpoch != null) KeyValueRow("Manufactured", Fmt.isoDate(snapshot.manufacturingEpoch * 1000))
+                Spacer(Modifier.height(6.dp))
+                Text("Set design capacity", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { showDesignDialog = true }.padding(vertical = 3.dp))
             }
         }
 
@@ -760,4 +786,86 @@ private fun Tip(text: String) {
         Box(Modifier.padding(top = 7.dp).size(5.dp).clip(CircleShape).background(Cell.Accent))
         Text(text, color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
     }
+}
+
+/** Charge-alarm control on the Now screen: pick a target level or turn it off. */
+@Composable
+private fun ChargeAlarmCard(status: String) {
+    val ctx = LocalContext.current
+    var target by remember { mutableStateOf(AppPrefs.chargeAlarmTarget(ctx)) }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    fun apply(v: Int) {
+        target = v
+        AppPrefs.setChargeAlarmTarget(ctx, v)
+        if (v > 0) {
+            if (Build.VERSION.SDK_INT >= 33) permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            if (status == "Charging" || status == "Full") ChargeAlarm.scheduleCheck(ctx, 0)
+        } else {
+            ChargeAlarm.cancel(ctx)
+            ChargeAlarm.cancelNotification(ctx)
+        }
+    }
+    SurfaceCard {
+        Column {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                SectionLabel("Charge alarm")
+                Text(if (target > 0) "at $target%" else "off",
+                    color = if (target > 0) Cell.Accent else Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("Get a reminder to unplug at a set level, so the battery spends less time full.",
+                color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                listOf(0, 80, 85, 90, 95).forEach { v ->
+                    val sel = v == target
+                    Box(
+                        Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(if (sel) Cell.AccentSoft else Cell.SurfaceHi)
+                            .border(1.dp, if (sel) Cell.BorderAccent else Cell.Border, RoundedCornerShape(8.dp))
+                            .clickable { apply(v) }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) {
+                        Text(if (v == 0) "Off" else "$v%", color = if (sel) Cell.Accent else Cell.TextMuted,
+                            fontSize = 12.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Lets the user set (or clear) a manual design-capacity override, AccuBattery-style. */
+@Composable
+private fun DesignCapacityDialog(current: Int?, onDismiss: () -> Unit, onSave: (Int?) -> Unit) {
+    var textVal by remember { mutableStateOf(current?.toString() ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Design capacity", fontFamily = Sans, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                Text("Set your battery's rated capacity in mAh if the detected value is wrong. Leave it blank to let Cellspan detect it automatically.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = textVal,
+                    onValueChange = { s -> textVal = s.filter { it.isDigit() }.take(5) },
+                    label = { Text("mAh") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                if (current != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Current value: $current mAh.", color = Cell.TextFaint, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(textVal.toIntOrNull()) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave(null) }) { Text("Use automatic") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
