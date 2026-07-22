@@ -1,11 +1,19 @@
 package io.github.jenil1320.cellspan.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -43,10 +51,22 @@ fun TimeSeriesChart(
     scatter: Boolean = false,
     regressionLine: List<Pair<Float, Float>>? = null,
     lineColor: Color = Cell.Accent,
+    thresholdColor: Color = Cell.Bad,
+    xValueLabel: ((Float) -> String)? = null,
 ) {
     val tm = rememberTextMeasurer()
     val lbl = TextStyle(color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp)
-    Canvas(modifier.fillMaxWidth().height(height)) {
+    // Long-press then slide to scrub: shows a crosshair with the value (and time) there.
+    var touchX by remember { mutableStateOf<Float?>(null) }
+    val chartMod = modifier.fillMaxWidth().height(height).pointerInput(points) {
+        detectDragGesturesAfterLongPress(
+            onDragStart = { touchX = it.x },
+            onDrag = { change, _ -> touchX = change.position.x; change.consume() },
+            onDragEnd = { touchX = null },
+            onDragCancel = { touchX = null },
+        )
+    }
+    Canvas(chartMod) {
         if (points.isEmpty()) return@Canvas
 
         val fc = forecast?.takeIf { it.size >= 2 }
@@ -87,10 +107,10 @@ fun TimeSeriesChart(
             val y = py(th)
             var x = ml
             while (x < ml + pw) {
-                drawLine(Cell.Bad.copy(alpha = 0.7f), Offset(x, y), Offset(x + 6f, y), 1.5f); x += 11f
+                drawLine(thresholdColor.copy(alpha = 0.7f), Offset(x, y), Offset(x + 6f, y), 1.5f); x += 11f
             }
             thresholdLabel?.let {
-                val lay = tm.measure(it, lbl.copy(color = Cell.Bad))
+                val lay = tm.measure(it, lbl.copy(color = thresholdColor))
                 drawText(lay, topLeft = Offset(ml + pw - lay.size.width, y - lay.size.height - 2))
             }
         }
@@ -142,6 +162,25 @@ fun TimeSeriesChart(
         }
         val end = tm.measure(xEnd, lbl)
         drawText(end, topLeft = Offset(ml + pw - end.size.width, xBase))
+
+        // Scrub overlay: a crosshair at the nearest point, with a value/time tooltip.
+        touchX?.let { tx ->
+            val cxTouch = tx.coerceIn(ml, ml + pw)
+            val near = points.minByOrNull { kotlin.math.abs(px(it.first) - cxTouch) } ?: return@let
+            val nx = px(near.first); val ny = py(near.second)
+            var yy = mt
+            while (yy < mt + ph) { drawLine(Cell.TextMuted.copy(alpha = 0.5f), Offset(nx, yy), Offset(nx, yy + 5f), 1.2f); yy += 9f }
+            drawCircle(lineColor.copy(alpha = 0.2f), 11f, Offset(nx, ny))
+            drawCircle(lineColor, 5.5f, Offset(nx, ny))
+            val tip = TextStyle(color = Cell.OnTile, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            val text = xValueLabel?.invoke(near.first)?.let { "$it   ${yFormat(near.second)}" } ?: yFormat(near.second)
+            val lay = tm.measure(text, tip)
+            val boxW = lay.size.width + 16f; val boxH = lay.size.height + 10f
+            val boxX = (nx - boxW / 2f).coerceIn(ml, ml + pw - boxW)
+            drawRoundRect(Cell.TileCharcoal, topLeft = Offset(boxX, mt), size = Size(boxW, boxH),
+                cornerRadius = CornerRadius(6f, 6f))
+            drawText(lay, topLeft = Offset(boxX + 8f, mt + 5f))
+        }
     }
 }
 

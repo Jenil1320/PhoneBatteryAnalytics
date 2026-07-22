@@ -418,6 +418,8 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                 xStart = Fmt.isoDate(history.firstOrNull { it.sohPct != null }?.timestampMs), xEnd = "now",
                 threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%",
                 scatter = true, regressionLine = reg)
+            Text("Each dot is one health reading; the line is the trend through them. They scatter because a single reading is only an estimate — the trend is what matters.",
+                color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
         // Measured vs modeled: is this cell aging normally for its cycle count?
@@ -506,26 +508,35 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             SurfaceCard {
                 Column {
                     SectionLabel("Forecast", color = Cell.Accent)
-                    if (fc.etaDateMs != null) {
-                        Text("At your recent rate, capacity may reach 80% around ${Fmt.date(fc.etaDateMs)}.",
-                            color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp,
-                            modifier = Modifier.padding(top = 8.dp))
+                    val trendy = (fc.r2 ?: 0.0) >= 0.25
+                    val atThreshold = (analysis?.sohPct ?: 100.0) <= 80.5
+                    Text(
+                        when {
+                            fc.etaDateMs == null ->
+                                "Aging slowly — not projected to reach 80% within the next five years."
+                            atThreshold ->
+                                "Your battery is around the 80% mark now — the point often used to consider a replacement."
+                            trendy ->
+                                "At your recent rate, capacity may reach 80% around ${Fmt.date(fc.etaDateMs)}."
+                            else ->
+                                "By the typical-wear model, capacity may reach 80% around ${Fmt.date(fc.etaDateMs)}."
+                        },
+                        color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    if (trendy) {
                         val lo = fc.etaLowMs; val hi = fc.etaHighMs
                         if (lo != null && hi != null && Fmt.date(lo) != Fmt.date(hi)) {
                             Text("Likely range: ${Fmt.date(lo)} – ${Fmt.date(hi)}.",
                                 color = Cell.TextMuted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 3.dp))
                         }
-                        val projPts = projectionPoints(fc.curve)
-                        if (projPts.size >= 2) {
-                            Spacer(Modifier.height(12.dp))
-                            TimeSeriesChart(projPts, height = 96.dp, yFormat = { "${it.toInt()}%" },
-                                xStart = "now", xEnd = Fmt.date(fc.etaDateMs),
-                                threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%", lineColor = Cell.Accent)
-                        }
-                    } else {
-                        Text("Aging slowly — not projected to reach 80% within the next five years.",
-                            color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp,
-                            modifier = Modifier.padding(top = 8.dp))
+                    }
+                    val projPts = projectionPoints(fc.curve)
+                    if (projPts.size >= 2) {
+                        Spacer(Modifier.height(12.dp))
+                        TimeSeriesChart(projPts, height = 96.dp, yFormat = { "${it.toInt()}%" },
+                            xStart = "now", xEnd = fc.etaDateMs?.let { Fmt.date(it) } ?: "5 yr",
+                            threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%", lineColor = Cell.Accent)
                     }
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -543,7 +554,9 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     aging?.let {
                         Text(it, color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 12.dp))
                     }
-                    Text("An on-device trend projection from your history, not a guarantee — it shifts with temperature and how you charge.",
+                    Text(
+                        if (trendy) "An on-device trend projection from your history, not a guarantee — it shifts with temperature and how you charge."
+                        else "Your health readings are still too noisy for a reliable trend, so this leans on the typical-wear model. A rough guide, not a guarantee.",
                         color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp))
                 }
             }

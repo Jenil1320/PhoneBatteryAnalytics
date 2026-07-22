@@ -137,9 +137,10 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         Spacer(Modifier.height(18.dp))
         if (live) {
             val tp = dayPoints(socLog, nowTs, { it.temperatureC })
+            val t0t = socLog.firstOrNull { it.timestampMs >= since24 && it.temperatureC != null }?.timestampMs
             TrendCard("Temperature · live", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
-                Fmt.time(socLog.firstOrNull { it.timestampMs >= since24 && it.temperatureC != null }?.timestampMs), "now",
-                xMid = dayMid,
+                Fmt.time(t0t), "now", xMid = dayMid,
+                xValueLabel = t0t?.let { t0 -> { x: Float -> Fmt.time(t0 + (x * 3_600_000f).toLong()) } },
                 emptyMsg = "Battery temperature over the last 24 hours appears here as readings accumulate.") {
                 MinNowMaxRow(tp.map { it.second }) { String.format(Locale.US, "%.1f°C", it) }
             }
@@ -164,9 +165,10 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         Spacer(Modifier.height(18.dp))
         if (live) {
             val vp = dayPoints(socLog, nowTs, { it.voltageV })
+            val t0v = socLog.firstOrNull { it.timestampMs >= since24 && it.voltageV != null }?.timestampMs
             TrendCard("Voltage · live", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
-                Fmt.time(socLog.firstOrNull { it.timestampMs >= since24 && it.voltageV != null }?.timestampMs), "now",
-                xMid = dayMid,
+                Fmt.time(t0v), "now", xMid = dayMid,
+                xValueLabel = t0v?.let { t0 -> { x: Float -> Fmt.time(t0 + (x * 3_600_000f).toLong()) } },
                 emptyMsg = "Terminal voltage over the last 24 hours — updates while the app is open.") {
                 MinNowMaxRow(vp.map { it.second }) { String.format(Locale.US, "%.2f V", it) }
             }
@@ -181,39 +183,36 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         Spacer(Modifier.height(18.dp))
         if (live) {
             val cp = dayPoints(socLog, nowTs, { it.currentMa?.toFloat() })
+            val t0c = socLog.firstOrNull { it.timestampMs >= since24 && it.currentMa != null }?.timestampMs
             TrendCard("Current · live", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
-                Fmt.time(socLog.firstOrNull { it.timestampMs >= since24 && it.currentMa != null }?.timestampMs), "now",
-                xMid = dayMid, threshold = 0f, thresholdLabel = "0 mA",
+                Fmt.time(t0c), "now", xMid = dayMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
+                xValueLabel = t0c?.let { t0 -> { x: Float -> Fmt.time(t0 + (x * 3_600_000f).toLong()) } },
                 emptyMsg = "Charge/discharge current over the last 24 hours — updates while the app is open.") {
                 MinNowMaxRow(cp.map { it.second }) { "${it.toInt()} mA" }
                 Spacer(Modifier.height(4.dp))
-                Text("Positive = charging, negative = discharging.", color = Cell.TextFaint, fontSize = 11.sp)
+                Text("Above the 0 mA line = charging, below = discharging.", color = Cell.TextFaint, fontSize = 11.sp)
             }
         } else {
             val cp = vitalPoints(window, { it.currAvg?.toFloat() })
             TrendCard("Current · daily avg", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
-                xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA",
+                xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
                 emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.") {
-                Text("Positive = net charging that day, negative = net discharge.", color = Cell.TextFaint, fontSize = 11.sp,
+                Text("Above the 0 mA line = net charging that day, below = net discharge.", color = Cell.TextFaint, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 6.dp))
             }
         }
 
         // ── Charge cycles ───────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
-        if (live) {
-            SurfaceCard {
-                Column {
-                    SectionLabel("Charge cycles")
-                    Spacer(Modifier.height(10.dp))
-                    Text("Cycle count changes too slowly to chart within a day. Switch to Week, Month or a custom range to see it climb.",
-                        color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
-                }
-            }
-        } else {
-            val cyc = vitalPoints(window, { it.cycles?.toFloat() })
+        run {
+            // Cycle count is a daily metric: on the Day view show the recent daily history
+            // rather than a flat within-day line, so the chart is always meaningful.
+            val cs = if (live) dailyVitals.takeLast(21) else window
+            val cyc = vitalPoints(cs, { it.cycles?.toFloat() })
             TrendCard("Charge cycles · daily", cyc, { "${it.toInt()} cyc" }, Cell.AccentDeep,
-                xStartDays, xEndDays, xMid = aggMid,
+                cs.firstOrNull()?.day?.let { dayLabel(it) } ?: "",
+                if (live) "today" else xEndDays,
+                xMid = cs.getOrNull(cs.size / 2)?.day?.let { dayLabel(it) } ?: "",
                 threshold = BatteryAnalytics.REPLACE_CYCLES.toFloat(), thresholdLabel = "800",
                 emptyMsg = "Cycle history builds one point per day. If your phone reports cycle count, it appears here.")
         }
@@ -322,6 +321,8 @@ private fun TrendCard(
     xMid: String = "",
     threshold: Float? = null,
     thresholdLabel: String? = null,
+    thresholdColor: Color = Cell.Bad,
+    xValueLabel: ((Float) -> String)? = null,
     emptyMsg: String,
     extra: (@Composable () -> Unit)? = null,
 ) {
@@ -331,7 +332,8 @@ private fun TrendCard(
             Spacer(Modifier.height(12.dp))
             if (points.size >= 2) {
                 TimeSeriesChart(points, yFormat = yFormat, lineColor = lineColor, xStart = xStart, xEnd = xEnd,
-                    xMid = xMid, threshold = threshold, thresholdLabel = thresholdLabel)
+                    xMid = xMid, threshold = threshold, thresholdLabel = thresholdLabel,
+                    thresholdColor = thresholdColor, xValueLabel = xValueLabel)
                 extra?.invoke()
             } else {
                 Text(emptyMsg, color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)

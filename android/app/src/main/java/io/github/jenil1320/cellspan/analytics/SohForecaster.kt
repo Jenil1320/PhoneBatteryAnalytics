@@ -83,23 +83,41 @@ object SohForecaster {
         }
         val scale = if (den > 1e-12) (num / den).coerceIn(0.2, 5.0) else null
 
-        val fadePerYear = if (fit.b < 0) -fit.b * cpd * 365.25 else 0.0
+        // The recency-weighted trend is only trustworthy when it actually explains the
+        // data. With a short or noisy (estimate-only) history the fit is essentially
+        // flat noise (R² ≈ 0); extrapolating its slope linearly would invent an alarming,
+        // wrong fade rate. When the fit is weak, fall back to the physics model's own
+        // sub-linear projection, which is far more honest for an already-aged cell.
+        val reliableTrend = fit.r2 >= 0.25 && fit.b < -1e-5
 
-        val etaTrend = crossDate(cross(fit.a, fit.b), cyclesNow, cpd, nowMs)
-        val etaFast = crossDate(cross(fit.a, fit.b - 1.3 * fit.slopeSe), cyclesNow, cpd, nowMs)
-        val etaSlow = crossDate(cross(fit.a, fit.b + 1.3 * fit.slopeSe), cyclesNow, cpd, nowMs)
+        // Physics-projected loss over the next year (percentage points), scaled to the
+        // user's measured-vs-model ratio. Sub-linear, so it stays small for a worn cell.
+        val physicsFadePerYear = (
+            (physicsLossFrac(cyclesNow + cpd * 365.25) - physicsLossFrac(cyclesNow)) * 100.0 * (scale ?: 1.0)
+            ).coerceAtLeast(0.0)
         val etaPhysics = physicsCrossMs(scale ?: 1.0, cyclesNow, cpd, nowMs, physicsLossFrac)
 
-        // Report the earlier of trend and physics crossings (knee-optimism guard),
-        // then keep the likely range bracketing it (physics can bind earlier than the
-        // trend's fast bound).
-        val eta = listOfNotNull(etaTrend, etaPhysics).minOrNull()
-        val lo = listOfNotNull(etaFast, eta).minOrNull()
-        val hi = listOfNotNull(etaSlow, eta).maxOrNull()
-
-        val curve = if (fit.b < -1e-5)
-            trendCurve(fit, cyclesNow, cpd, nowMs, eta)
-        else physicsCurve(cyclesNow, cpd, nowMs, eta, physicsLossFrac)
+        val fadePerYear: Double
+        val eta: Long?
+        val lo: Long?
+        val hi: Long?
+        val curve: List<Pair<Long, Double>>
+        if (reliableTrend) {
+            fadePerYear = -fit.b * cpd * 365.25
+            val etaTrend = crossDate(cross(fit.a, fit.b), cyclesNow, cpd, nowMs)
+            val etaFast = crossDate(cross(fit.a, fit.b - 1.3 * fit.slopeSe), cyclesNow, cpd, nowMs)
+            val etaSlow = crossDate(cross(fit.a, fit.b + 1.3 * fit.slopeSe), cyclesNow, cpd, nowMs)
+            // Earlier of trend and physics crossings (knee-optimism guard); range brackets it.
+            eta = listOfNotNull(etaTrend, etaPhysics).minOrNull()
+            lo = listOfNotNull(etaFast, eta).minOrNull()
+            hi = listOfNotNull(etaSlow, eta).maxOrNull()
+            curve = trendCurve(fit, cyclesNow, cpd, nowMs, eta)
+        } else {
+            fadePerYear = physicsFadePerYear
+            eta = etaPhysics
+            lo = null; hi = null
+            curve = physicsCurve(cyclesNow, cpd, nowMs, eta, physicsLossFrac)
+        }
 
         return Forecast(Method.TREND, eta, lo, hi, fadePerYear, scale, fit.r2, curve)
     }
@@ -163,8 +181,10 @@ object SohForecaster {
     }
 
     private fun trendCurve(fit: Line, cyclesNow: Double, cpd: Double, nowMs: Long, etaMs: Long?): List<Pair<Long, Double>> {
-        val end = etaMs ?: (nowMs + (MAX_HORIZON_DAYS.coerceAtMost(365.0) * DAY).toLong())
-        if (end <= nowMs) return emptyList()
+        // Always project at least ~6 months so the chart has a visible line, even when
+        // the battery is already at/near the 80% line (eta ≈ now).
+        val minEnd = nowMs + (180.0 * DAY).toLong()
+        val end = maxOf(etaMs ?: (nowMs + (365.0 * DAY).toLong()), minEnd)
         val out = ArrayList<Pair<Long, Double>>()
         val steps = 10
         for (i in 0..steps) {
@@ -176,11 +196,14 @@ object SohForecaster {
     }
 
     private fun physicsCurve(cyclesNow: Double, cpd: Double?, nowMs: Long, etaMs: Long?, lossFn: (Double) -> Double): List<Pair<Long, Double>> {
-        if (cpd == null || etaMs == null || etaMs <= nowMs) return emptyList()
+        if (cpd == null) return emptyList()
+        // Project to eta, but always at least ~6 months so the chart shows a line.
+        val minEnd = nowMs + (180.0 * DAY).toLong()
+        val end = maxOf(etaMs ?: (nowMs + (365.0 * DAY).toLong()), minEnd)
         val out = ArrayList<Pair<Long, Double>>()
         val steps = 10
         for (i in 0..steps) {
-            val t = nowMs + (etaMs - nowMs) * i / steps
+            val t = nowMs + (end - nowMs) * i / steps
             val cycles = cyclesNow + cpd * ((t - nowMs) / DAY)
             out.add(t to (100.0 * (1.0 - lossFn(cycles))).coerceIn(0.0, 100.0))
         }
