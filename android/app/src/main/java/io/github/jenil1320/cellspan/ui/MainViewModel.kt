@@ -5,6 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.jenil1320.cellspan.analytics.Analysis
 import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
+import io.github.jenil1320.cellspan.analytics.CapacitySource
+import io.github.jenil1320.cellspan.analytics.DegradationModel
+import io.github.jenil1320.cellspan.analytics.SohForecaster
 import io.github.jenil1320.cellspan.data.AccrualCursor
 import io.github.jenil1320.cellspan.data.BatteryReader
 import io.github.jenil1320.cellspan.data.BatterySnapshot
@@ -29,6 +32,7 @@ data class UiState(
     val dailyUsage: List<Pair<String, Double>> = emptyList(),
     val socLog: List<SocPoint> = emptyList(),
     val dailyVitals: List<DailyVital> = emptyList(),
+    val sohForecast: SohForecaster.Forecast? = null,
 )
 
 private const val TREND_DAYS = 31
@@ -71,6 +75,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
                     store.recordVitals(dayKey(snapshot.timestampMs), snapshot.temperatureC,
                         snapshot.voltageV, ma(snapshot.currentUa), snapshot.cycleCount)
+                    analysis = smoothEstimate(store, analysis)  // steady headline (after inserting raw)
                     history = store.recent()
                     usage = store.dailyUsage(7)
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
@@ -78,7 +83,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 // history is best-effort; never let it crash the app
             }
-            _state.value = UiState(false, snapshot, analysis, history, usage, socLog, vitals)
+            val forecast = runCatching { buildForecast(history, analysis, now) }.getOrNull()
+            _state.value = UiState(false, snapshot, analysis, history, usage, socLog, vitals, forecast)
         }
     }
 
@@ -103,6 +109,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
                     store.recordVitals(dayKey(snapshot.timestampMs), snapshot.temperatureC,
                         snapshot.voltageV, ma(snapshot.currentUa), snapshot.cycleCount)
+                    analysis = smoothEstimate(store, analysis)
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
                     usage = store.dailyUsage(7)
                 }
@@ -130,4 +137,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun avgTemp(v: List<DailyVital>): Double? =
         v.mapNotNull { it.tempAvg?.toDouble() }.average().takeIf { !it.isNaN() }
+
+    /**
+     * Stabilise the displayed capacity/SoH when it's the noisy instantaneous estimate,
+     * using a median of recent stored readings so the headline number stops bouncing
+     * between refreshes. The raw sample is stored first, so the capacity scatter stays
+     * honest; only the displayed headline is smoothed.
+     */
+    private fun smoothEstimate(store: HistoryStore, analysis: Analysis): Analysis {
+        if (analysis.capacitySource != CapacitySource.ESTIMATE) return analysis
+        val cur = analysis.currentCapacityMah ?: return analysis
+        val design = analysis.designCapacityMah ?: return analysis
+        if (design <= 0) return analysis
+        val smoothed = store.medianCapacityMah(cur)
+        val soh = (smoothed.toDouble() / design * 100.0).coerceIn(0.0, 100.0)
+        return analysis.copy(
+            currentCapacityMah = smoothed,
+            sohPct = soh,
+            condition = BatteryAnalytics.conditionFor(soh, analysis.cycleCount),
+        )
+    }
+
+    /** Fit the on-device SoH trend from history, cross-checked against the physics model. */
+    private fun buildForecast(history: List<HistoryPoint>, analysis: Analysis, nowMs: Long): SohForecaster.Forecast? {
+        val design = analysis.designCapacityMah ?: return null
+        val cyclesNow = analysis.cycleCount?.toDouble() ?: return null
+        val samples = history.mapNotNull { hp ->
+            val soh = hp.sohPct
+            val cyc = hp.cycleCount
+            if (soh != null && cyc != null) SohForecaster.Sample(soh, cyc.toDouble(), hp.timestampMs) else null
+        }
+        return SohForecaster.forecast(samples, cyclesNow, nowMs,
+            physicsLossFrac = { c -> DegradationModel.cyclicLossFrac(c, design) })
+    }
 }

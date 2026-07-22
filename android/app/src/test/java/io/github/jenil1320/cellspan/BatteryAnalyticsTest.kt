@@ -232,6 +232,35 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun voltageReading_bands() {
+        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.voltageReading(3.3f).level)
+        assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.voltageReading(3.8f).level)
+        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.voltageReading(4.45f).level)
+        assertEquals(BatteryAnalytics.Level.INFO, BatteryAnalytics.voltageReading(null).level)
+    }
+
+    @Test
+    fun currentReading_bands() {
+        assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.currentReading(500_000, "Charging").level)
+        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.currentReading(-1_800_000, "Discharging").level)
+        assertEquals(BatteryAnalytics.Level.INFO, BatteryAnalytics.currentReading(-300_000, "Discharging").level)
+    }
+
+    @Test
+    fun powerReading_bands() {
+        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.powerReading(7.0).level)
+        assertEquals(BatteryAnalytics.Level.INFO, BatteryAnalytics.powerReading(3.0).level)
+        assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.powerReading(1.0).level)
+    }
+
+    @Test
+    fun tempLevel_mapsBands() {
+        assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.tempLevel(BatteryAnalytics.TempBand.NORMAL))
+        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.tempLevel(BatteryAnalytics.TempBand.WARM))
+        assertEquals(BatteryAnalytics.Level.BAD, BatteryAnalytics.tempLevel(BatteryAnalytics.TempBand.HOT))
+    }
+
+    @Test
     fun levelDistribution_bucketsIntoTenBands() {
         val d = BatteryAnalytics.levelDistribution(listOf(5, 12, 15, 100, 0, 99))
         assertEquals(10, d.size)

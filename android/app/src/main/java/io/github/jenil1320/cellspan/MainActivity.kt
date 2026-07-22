@@ -87,7 +87,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
         Box(Modifier.fillMaxSize().background(Cell.pageBackground).padding(padding)) {
             when (tab) {
                 Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage, state.socLog)
-                Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history)
+                Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast)
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
                 Tab.DRAINS -> DrainsScreen()
                 Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis)

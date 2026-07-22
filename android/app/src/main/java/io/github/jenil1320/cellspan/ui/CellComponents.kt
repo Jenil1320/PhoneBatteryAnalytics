@@ -92,11 +92,15 @@ fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier
             .padding(14.dp)
     ) {
         Column {
-            SectionLabel(label)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(6.dp).clip(CircleShape).background(accent))
+                SectionLabel(label)
+            }
             Text(value, color = accent, fontFamily = Mono, fontSize = 20.sp,
                 fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
             if (sub.isNotEmpty()) {
-                Text(sub, color = Cell.TextMuted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp))
+                Text(sub, color = Cell.TextSecondary, fontFamily = Mono, fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }

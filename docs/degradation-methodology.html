@@ -1,0 +1,315 @@
+<title>How Cellspan calculates battery degradation</title>
+<style>
+  :root {
+    --ground: #f5f7f2;
+    --surface: #ffffff;
+    --surface-2: #f0f3ec;
+    --ink: #2f3e46;
+    --ink-soft: #4a5a56;
+    --ink-mute: #77857d;
+    --line: rgba(53, 79, 82, 0.15);
+    --line-strong: rgba(53, 79, 82, 0.28);
+    --teal: #52796f;      /* cyclic */
+    --teal-tint: rgba(82, 121, 111, 0.09);
+    --sage: #5f8468;      /* calendar */
+    --sage-tint: rgba(95, 132, 104, 0.10);
+    --tan: #a7754d;       /* calibration */
+    --tan-tint: rgba(167, 117, 77, 0.12);
+    --shadow: 0 1px 2px rgba(47, 62, 70, 0.05), 0 6px 20px rgba(47, 62, 70, 0.06);
+    --sans: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "DM Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #161e1b;
+      --surface: #1d2622;
+      --surface-2: #212b26;
+      --ink: #e9eee8;
+      --ink-soft: #b3c4b8;
+      --ink-mute: #83928a;
+      --line: rgba(255, 255, 255, 0.10);
+      --line-strong: rgba(255, 255, 255, 0.18);
+      --teal: #8fc2a4;
+      --teal-tint: rgba(143, 194, 164, 0.12);
+      --sage: #9cc4a6;
+      --sage-tint: rgba(156, 196, 166, 0.12);
+      --tan: #cd9a70;
+      --tan-tint: rgba(205, 154, 112, 0.15);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f5f7f2; --surface: #ffffff; --surface-2: #f0f3ec;
+    --ink: #2f3e46; --ink-soft: #4a5a56; --ink-mute: #77857d;
+    --line: rgba(53, 79, 82, 0.15); --line-strong: rgba(53, 79, 82, 0.28);
+    --teal: #52796f; --teal-tint: rgba(82, 121, 111, 0.09);
+    --sage: #5f8468; --sage-tint: rgba(95, 132, 104, 0.10);
+    --tan: #a7754d; --tan-tint: rgba(167, 117, 77, 0.12);
+    --shadow: 0 1px 2px rgba(47, 62, 70, 0.05), 0 6px 20px rgba(47, 62, 70, 0.06);
+  }
+  :root[data-theme="dark"] {
+    --ground: #161e1b; --surface: #1d2622; --surface-2: #212b26;
+    --ink: #e9eee8; --ink-soft: #b3c4b8; --ink-mute: #83928a;
+    --line: rgba(255, 255, 255, 0.10); --line-strong: rgba(255, 255, 255, 0.18);
+    --teal: #8fc2a4; --teal-tint: rgba(143, 194, 164, 0.12);
+    --sage: #9cc4a6; --sage-tint: rgba(156, 196, 166, 0.12);
+    --tan: #cd9a70; --tan-tint: rgba(205, 154, 112, 0.15);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 72px 28px 120px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(30px, 6vw, 46px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    font-weight: 700;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  .dek {
+    font-size: 18px;
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: 0 0 28px;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    padding-top: 22px; border-top: 1px solid var(--line);
+  }
+  .chip {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--ink-soft);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px;
+  }
+
+  h2 {
+    font-size: 22px; letter-spacing: -0.01em; font-weight: 600;
+    margin: 64px 0 6px; text-wrap: balance;
+  }
+  h2 .n {
+    font-family: var(--mono); font-size: 13px; color: var(--ink-mute);
+    margin-right: 12px; font-weight: 500;
+  }
+  .lead { color: var(--ink-soft); margin: 0 0 22px; max-width: 66ch; }
+  p { max-width: 66ch; }
+  a { color: var(--teal); text-underline-offset: 3px; }
+
+  /* Formula cards */
+  .terms { display: grid; gap: 18px; margin: 26px 0; }
+  @media (min-width: 620px) { .terms { grid-template-columns: 1fr 1fr; } }
+  .term {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 16px; padding: 22px; box-shadow: var(--shadow);
+    border-top: 3px solid var(--edge);
+  }
+  .term.cal { --edge: var(--sage); }
+  .term.cyc { --edge: var(--teal); }
+  .term .kind {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+    text-transform: uppercase; margin: 0 0 4px;
+  }
+  .term.cal .kind { color: var(--sage); }
+  .term.cyc .kind { color: var(--teal); }
+  .term h3 { margin: 0 0 14px; font-size: 17px; font-weight: 600; }
+  .eq {
+    font-family: var(--mono); font-size: 15px; line-height: 1.9;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; margin: 0 0 12px;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .eq.small { font-size: 13.5px; }
+  .term p { font-size: 14px; color: var(--ink-soft); margin: 10px 0 0; max-width: none; }
+  .eq .v { color: var(--teal); }
+  .term.cal .eq .v { color: var(--sage); }
+
+  .total {
+    font-family: var(--mono); font-size: clamp(15px, 3.4vw, 19px);
+    text-align: center; background: var(--surface); box-shadow: var(--shadow);
+    border: 1px solid var(--line-strong); border-radius: 14px;
+    padding: 20px; margin: 26px 0; overflow-x: auto; white-space: nowrap;
+  }
+  .total b { color: var(--teal); }
+
+  /* Tables */
+  .scroll { overflow-x: auto; margin: 22px 0; border-radius: 12px; border: 1px solid var(--line); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface); }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-mute); background: var(--surface-2); position: sticky; top: 0;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.code, td .code, .code { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td .code { color: var(--ink); }
+  .sym { font-family: var(--mono); color: var(--teal); white-space: nowrap; }
+
+  /* Callout */
+  .callout {
+    background: var(--tan-tint); border: 1px solid var(--tan);
+    border-left-width: 4px; border-radius: 12px; padding: 20px 22px; margin: 30px 0;
+  }
+  .callout .kind {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--tan); margin: 0 0 8px;
+  }
+  .callout p { margin: 0; max-width: none; }
+  .callout b { color: var(--ink); }
+
+  .note {
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 20px; margin: 22px 0;
+    font-size: 14px; color: var(--ink-soft);
+  }
+  .note b { color: var(--ink); }
+
+  ul.sources { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 12px; }
+  ul.sources li {
+    font-size: 14px; padding-left: 18px; position: relative; color: var(--ink-soft);
+    max-width: 70ch;
+  }
+  ul.sources li::before {
+    content: ""; position: absolute; left: 0; top: 10px;
+    width: 6px; height: 6px; border-radius: 50%; background: var(--teal);
+  }
+  ul.sources b { color: var(--ink); font-weight: 600; }
+  .foot { margin-top: 70px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-mute); }
+  sup, sub { font-size: 0.72em; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Cellspan · Methodology</p>
+    <h1>How Cellspan calculates battery degradation</h1>
+    <p class="dek">Cellspan shows a <em>modeled</em> — “typical” — State of Health beside the value it measures from your phone, so you can tell whether your battery is aging normally for its cycle count. Here is exactly how that modeled number is computed, and where the parameters come from.</p>
+    <div class="meta">
+      <span class="chip">Model: Schmalstieg NMC / SimSES</span>
+      <span class="chip">Calendar + cyclic</span>
+      <span class="chip">Reference: Google Pixel 7</span>
+    </div>
+  </header>
+
+  <section>
+    <h2><span class="n">01</span>The idea</h2>
+    <p class="lead">Capacity loss is modeled as the sum of two independent processes and subtracted from a healthy 100%. One process runs with time and temperature even when the phone rests (calendar aging); the other runs with charge throughput as you use and recharge it (cyclic aging).</p>
+    <div class="total">SoH<sub>modeled</sub> = 100% − ( <b style="color:var(--sage)">Q<sub>calendar</sub></b> + <b>Q<sub>cyclic</sub></b> )</div>
+    <p>The equations and coefficients are the <b>Schmalstieg holistic NMC aging model</b> as implemented in <b>SimSES</b>, the open-source energy-storage simulator from the Technical University of Munich. Of the models available it is the closest to a consumer lithium-polymer phone cell: an NMC/graphite chemistry with a sloped voltage curve, and — unusually — it is parameterised in cell <em>voltage</em>, which a phone can actually measure.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>The two terms</h2>
+    <p class="lead">Each term is a stress factor multiplied by an aging curve. Loss is a per-unit fraction; multiply by 100 for a percentage.</p>
+    <div class="terms">
+      <div class="term cal">
+        <p class="kind">Calendar · time &amp; heat</p>
+        <h3>Rest aging grows with √-ish time</h3>
+        <div class="eq">Q<sub>cal</sub> = α<sub>cap</sub> · t<sub>days</sub><sup>0.75</sup></div>
+        <div class="eq small">α<sub>cap</sub> = (7.543·<span class="v">V</span> − 23.75)·10<sup>6</sup> · e<sup>(−6976 / <span class="v">T</span>)</sup></div>
+        <p>Driven by an Arrhenius temperature term (T in kelvin) and a linear voltage term. Growth follows t<sup>0.75</sup> — fast early, then slowing — as the SEI layer thickens on the anode.</p>
+      </div>
+      <div class="term cyc">
+        <p class="kind">Cyclic · throughput</p>
+        <h3>Use aging grows with √-throughput</h3>
+        <div class="eq">Q<sub>cyc</sub> = β<sub>cap</sub> · √Q<sub>throughput</sub></div>
+        <div class="eq small">β<sub>cap</sub> = 7.348·10<sup>−3</sup>(<span class="v">V</span>−3.667)<sup>2</sup> + 7.6·10<sup>−4</sup> + 4.081·10<sup>−3</sup>·<span class="v">DoD</span></div>
+        <p>A parabola in mean cell voltage (gentlest at 3.667 V) plus a linear depth-of-discharge term, times the square root of charge throughput in ampere-hours.</p>
+      </div>
+    </div>
+    <p><b>Charge throughput</b> is the total ampere-hours passed through the cell: equivalent full cycles × design capacity. For the Pixel 7, that is the device-reported cycle count × 4.355 Ah.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>Coefficients &amp; inputs</h2>
+    <p class="lead">Every constant is transcribed verbatim from the model; nothing is invented. Units are the part implementations most often get wrong.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Symbol</th><th>Meaning</th><th>Value / unit</th></tr></thead>
+        <tbody>
+          <tr><td class="sym">t<sub>days</sub></td><td>Battery age</td><td class="code">days</td></tr>
+          <tr><td class="sym">T</td><td>Temperature (Arrhenius)</td><td class="code">kelvin</td></tr>
+          <tr><td class="sym">V</td><td>Mean cell voltage — rest for calendar, cycle-mean for cyclic</td><td class="code">volts</td></tr>
+          <tr><td class="sym">DoD</td><td>Representative depth of discharge</td><td class="code">fraction 0–1</td></tr>
+          <tr><td class="sym">Q<sub>throughput</sub></td><td>Cycles × design capacity</td><td class="code">ampere-hours</td></tr>
+          <tr><td class="sym">Q<sub>loss</sub></td><td>Relative capacity loss</td><td class="code">fraction (0.20 = 20%)</td></tr>
+          <tr><td class="sym">exp.</td><td>Calendar time exponent · cyclic throughput exponent</td><td class="code">0.75 · 0.5 (√)</td></tr>
+          <tr><td class="sym">vertex</td><td>Cyclic-aging voltage minimum</td><td class="code">3.667 V</td></tr>
+          <tr><td class="sym">E<sub>a</sub></td><td>Calendar activation energy (≈ 6976·R)</td><td class="code">≈ 58 kJ/mol</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">04</span>Calibration check</h2>
+    <div class="callout">
+      <p class="kind">Anchored to the Pixel 7</p>
+      <p>Google rates the Pixel 7 for <b>about 80% capacity after roughly 800 charge cycles</b>. With a typical phone cycle-mean voltage (~3.7 V) and depth of discharge, the cyclic term alone predicts <b>≈ 20% loss at 800 equivalent full cycles → ≈ 80% modeled SoH</b> — independently matching the manufacturer figure. That agreement is the model's sanity check, and it is asserted by a unit test in the app.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">05</span>What the phone can and can't feed it</h2>
+    <p class="lead">Two deliberate input choices keep the model honest on real hardware.</p>
+    <div class="note">
+      <p style="margin:0 0 12px"><b>Voltage is not taken from the live reading.</b> Both terms want a mean voltage the phone can't cleanly observe — the cycle mean for the cyclic term, the rest mean for calendar. The recent sample average is dominated by charging voltage (~4.3–4.45 V), which pushes the parabola far off and over-predicts wear. Cellspan uses fixed representative values instead, so cyclic wear is driven by throughput (cycle count), which is what actually accumulates it.</p>
+      <p style="margin:0"><b>Calendar aging needs a birth date the sandbox hides.</b> A normal app cannot read the manufacture date (it is SELinux-blocked), so on a stock phone only the cyclic term contributes and the app shows “needs battery age” for the calendar part. With root or an ADB helper, the calendar term switches on using the measured mean temperature.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">06</span>Why it's labeled “typical”, not exact</h2>
+    <p>The coefficients are fit to a 4.2 V-max NMC 18650 cell. Modern phones charge to 4.4–4.45 V and many use LCO or LCO/NMC pouch cells, where high-voltage degradation accelerates beyond the fitted range; the Pixel 7 also actively lowers its charge ceiling over life. So the model's <em>shape and exponents</em> transfer — square-root-of-time calendar aging, square-root-of-throughput cyclic aging, Arrhenius temperature — but the absolute coefficients are approximate for a phone cell. Cellspan therefore presents the output as a typical reference for comparison, never as an exact or manufacturer-accurate State of Health. The number you should trust for your specific battery is the <em>measured</em> one; the modeled value is there to tell you whether the measured value is normal.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">07</span>Forecasting the future</h2>
+    <p class="lead">Cellspan also projects where your battery is heading. This is on-device trend analysis — a plain statistical model that runs on your phone in a few lines of arithmetic — not "AI", and every figure is an estimate with an honest range, never a guarantee.</p>
+    <div class="terms">
+      <div class="term cyc">
+        <p class="kind">State of health · to 80%</p>
+        <h3>A trend line, checked against physics</h3>
+        <div class="eq small">SoH ≈ a + b·cycles &nbsp;(recency-weighted)</div>
+        <p>A recency-weighted least-squares regression of your measured SoH against charge cycles — a textbook machine-learning fit, run on-device. Its 80% crossing is converted to a date from your cycles-per-day, cross-checked against the physics model (fitted with a single scale factor that says whether you age faster or slower than typical), and the <em>earlier</em> of the two crossings is reported so the estimate isn't optimistic near end of life. The range comes from the slope's standard error.</p>
+      </div>
+      <div class="term cal">
+        <p class="kind">Drain · rest of day</p>
+        <h3>Projected from your recent rate</h3>
+        <div class="eq small">SoC(t) = SoC<sub>now</sub> − rate · Δt</div>
+        <p>Time-to-empty and the dashed rest-of-day curve come from the recent discharge slope (percentage points per hour), smoothed to avoid jumps. "Typical daily drain" is the median of recent days, which shrugs off the occasional heavy day. Shown only while actually on battery.</p>
+      </div>
+    </div>
+    <p>When there isn't enough history yet, the forecast falls back to the physics model alone and says so. The wording is deliberately hedged — "may reach 80% around …", "at your recent usage" — because battery behavior shifts with temperature, charging habits, and how you use the phone.</p>
+  </section>
+
+  <section>
+    <h2><span class="n">08</span>Sources</h2>
+    <ul class="sources">
+      <li><b>SimSES</b> (TU München, EES) — the open-source implementation this model is taken from: <span class="code">gitlab.lrz.de/open-ees-ses/simses</span>, files <span class="code">degradation/{calendar,cyclic}/nmc_sanyo_ur18650e.py</span>.</li>
+      <li><b>Schmalstieg, Käbitz, Ecker, Sauer</b> — “A holistic aging model for Li(NiMnCo)O₂ based 18650 lithium-ion batteries,” <em>J. Power Sources</em> 257 (2014) 325–334. DOI 10.1016/j.jpowsour.2014.02.012.</li>
+      <li><b>Naumann et al.</b> — LFP calendar and cyclic aging papers, the structural template (√t calendar, √-throughput cyclic). DOI 10.1016/j.est.2018.01.019 and 10.1016/j.jpowsour.2019.227666.</li>
+      <li><b>Battery University BU-808</b> — consumer LCO/NMC calendar and cycle-vs-depth trend tables, used as independent sanity checks.</li>
+      <li><b>Google Pixel battery guidance</b> — the ~80%-at-~800-cycles rating the model is calibrated against.</li>
+    </ul>
+  </section>
+
+  <p class="foot">Cellspan battery analytics · degradation methodology. Model output is a typical reference, not a manufacturer measurement or medical/safety advice.</p>
+</div>

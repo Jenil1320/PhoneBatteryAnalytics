@@ -9,11 +9,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,7 @@ fun TimeSeriesChart(
     xEnd: String = "now",
     threshold: Float? = null,
     thresholdLabel: String? = null,
+    forecast: List<Pair<Float, Float>>? = null,
     lineColor: Color = Cell.Accent,
 ) {
     val tm = rememberTextMeasurer()
@@ -46,12 +49,17 @@ fun TimeSeriesChart(
         val pw = size.width - ml - mr
         val ph = size.height - mt - mb
 
-        val ys = points.map { it.second }.toMutableList().also { l -> threshold?.let { l.add(it) } }
+        val fc = forecast?.takeIf { it.size >= 2 }
+        val ys = points.map { it.second }.toMutableList().also { l ->
+            threshold?.let { l.add(it) }
+            fc?.let { f -> l.addAll(f.map { it.second }) }
+        }
         var ymin = ys.min(); var ymax = ys.max()
         if (ymin == ymax) { ymin -= 1f; ymax += 1f }
         val padY = (ymax - ymin) * 0.12f; ymin -= padY; ymax += padY
         val xs = points.map { it.first }
-        var xmin = xs.min(); var xmax = xs.max()
+        val allX = xs + (fc?.map { it.first } ?: emptyList())
+        var xmin = allX.min(); var xmax = allX.max()
         if (xmin == xmax) { xmin -= 1f; xmax += 1f }
         fun px(x: Float) = ml + (x - xmin) / (xmax - xmin) * pw
         fun py(y: Float) = mt + (ymax - y) / (ymax - ymin) * ph
@@ -91,6 +99,15 @@ fun TimeSeriesChart(
             drawPath(line, lineColor, style = Stroke(5f, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
 
+        // Forecast overlay (dashed, muted) — a projection drawn from the latest point.
+        fc?.let { f ->
+            val fp = Path()
+            fp.moveTo(px(xs.last()), py(points.last().second))
+            f.forEach { (x, y) -> fp.lineTo(px(x), py(y)) }
+            drawPath(fp, lineColor.copy(alpha = 0.55f), style = Stroke(3.5f, cap = StrokeCap.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))))
+        }
+
         // Latest point marker.
         val lx = px(xs.last()); val ly = py(points.last().second)
         drawCircle(lineColor.copy(alpha = 0.2f), 12f, Offset(lx, ly))
@@ -111,41 +128,49 @@ fun TimeSeriesChart(
 fun UsageBars(
     bars: List<Pair<String, Float>>,
     modifier: Modifier = Modifier,
-    height: Dp = 150.dp,
+    height: Dp = 184.dp,
     valueFormat: (Float) -> String = { String.format("%.2f", it) },
     barColor: Color = Cell.Accent,
 ) {
     val tm = rememberTextMeasurer()
-    val lbl = TextStyle(color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.sp)
-    val valLbl = TextStyle(color = Cell.TextMuted, fontFamily = Mono, fontSize = 9.sp)
+    val lbl = TextStyle(color = Cell.TextSecondary, fontFamily = Mono, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    val valLbl = TextStyle(color = Cell.TextPrimary, fontFamily = Mono, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     Canvas(modifier.fillMaxWidth().height(height)) {
         if (bars.isEmpty()) return@Canvas
-        val mt = 16f; val mb = 20f
-        val ph = size.height - mt - mb
+        // Reserve a clear band at the top for value labels and at the bottom for day
+        // labels, so bars never overlap either. Sized to the measured text height.
+        val labelH = tm.measure("Wg", lbl).size.height.toFloat()
+        val valH = tm.measure("0.0", valLbl).size.height.toFloat()
+        val mt = valH + 8f
+        val mb = labelH + 14f
+        val baseY = size.height - mb
+        val ph = baseY - mt
         val maxV = (bars.maxOf { it.second }).coerceAtLeast(0.001f)
         val slot = size.width / bars.size
-        val bw = slot * 0.5f
+        val bw = slot * 0.52f
+
+        // Faint baseline the bars sit on, separating them from the day labels.
+        drawLine(Cell.Border, Offset(8f, baseY), Offset(size.width - 8f, baseY), 1.5f)
+
         bars.forEachIndexed { i, (label, v) ->
             val cx = slot * i + slot / 2f
             val bh = (v / maxV) * ph
-            val topY = mt + (ph - bh)
+            val topY = baseY - bh
             val left = cx - bw / 2f
-            // Bar (rounded look via a filled path with a cap circle would be heavier;
-            // a plain rect reads cleanly at this size).
             drawRoundRect(
                 color = if (v > 0f) barColor else Cell.Track,
                 topLeft = Offset(left, topY),
                 size = androidx.compose.ui.geometry.Size(bw, bh.coerceAtLeast(2f)),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(5f, 5f),
             )
-            // Value above the bar (only if there's room and it's non-zero).
+            // Value in the top band, above the bar.
             if (v > 0f) {
                 val vl = tm.measure(valueFormat(v), valLbl)
-                drawText(vl, topLeft = Offset(cx - vl.size.width / 2f, (topY - vl.size.height - 2f).coerceAtLeast(0f)))
+                drawText(vl, topLeft = Offset(cx - vl.size.width / 2f, (topY - vl.size.height - 4f).coerceAtLeast(0f)))
             }
-            // Day label under the bar.
+            // Day label centred in the bottom band, below the baseline.
             val dl = tm.measure(label, lbl)
-            drawText(dl, topLeft = Offset(cx - dl.size.width / 2f, size.height - dl.size.height))
+            drawText(dl, topLeft = Offset(cx - dl.size.width / 2f, baseY + (mb - dl.size.height) / 2f))
         }
     }
 }

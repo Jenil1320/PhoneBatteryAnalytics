@@ -228,6 +228,46 @@ object BatteryAnalytics {
     /** Equivalent full cycles represented by a day's discharged percentage points. */
     fun equivalentCycles(dischargedPct: Double): Double = dischargedPct / 100.0
 
+    // ── Parameter status (traffic-light color coding) ──────────────────────────
+    /** A parameter's health band, mapped to a color at the UI layer. */
+    enum class Level { GOOD, WATCH, BAD, INFO }
+
+    /** A status band plus a short human note for a live parameter. */
+    data class Reading(val level: Level, val note: String)
+
+    /** Terminal-voltage status: healthy mid-range, watch when unusually low/high. */
+    fun voltageReading(v: Float?): Reading = when {
+        v == null -> Reading(Level.INFO, "—")
+        v < 3.40f -> Reading(Level.WATCH, "Low")
+        v > 4.42f -> Reading(Level.WATCH, "High")
+        else -> Reading(Level.GOOD, "Healthy")
+    }
+
+    /** Current status: charging is good; a heavy sustained draw is worth watching. */
+    fun currentReading(currentUa: Long?, status: String): Reading = when {
+        currentUa == null -> Reading(Level.INFO, "—")
+        status == "Charging" -> Reading(Level.GOOD, "Charging")
+        kotlin.math.abs(currentUa / 1000) >= 1500 -> Reading(Level.WATCH, "Heavy draw")
+        else -> Reading(Level.INFO, "On battery")
+    }
+
+    /** Instantaneous power draw band. */
+    fun powerReading(watts: Double?): Reading = when {
+        watts == null -> Reading(Level.INFO, "—")
+        watts >= 6.0 -> Reading(Level.WATCH, "High")
+        watts >= 2.5 -> Reading(Level.INFO, "Moderate")
+        else -> Reading(Level.GOOD, "Low")
+    }
+
+    /** Temperature band mapped to the shared status levels. */
+    fun tempLevel(band: TempBand): Level = when (band) {
+        TempBand.COOL -> Level.INFO
+        TempBand.NORMAL -> Level.GOOD
+        TempBand.WARM -> Level.WATCH
+        TempBand.HOT -> Level.BAD
+        TempBand.UNKNOWN -> Level.INFO
+    }
+
     /**
      * Net discharge rate in percentage points per hour from a series of (timestampMs,
      * level) samples ordered oldest-first. Trims to the most recent continuous discharge

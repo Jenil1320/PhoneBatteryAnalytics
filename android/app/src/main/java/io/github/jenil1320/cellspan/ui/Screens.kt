@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -36,6 +38,8 @@ import io.github.jenil1320.cellspan.analytics.Analysis
 import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
 import io.github.jenil1320.cellspan.analytics.CapacitySource
 import io.github.jenil1320.cellspan.analytics.Condition
+import io.github.jenil1320.cellspan.analytics.DrainForecaster
+import io.github.jenil1320.cellspan.analytics.SohForecaster
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.HistoryPoint
 import io.github.jenil1320.cellspan.data.SocPoint
@@ -54,6 +58,7 @@ import io.github.jenil1320.cellspan.data.HistoryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -95,6 +100,12 @@ private fun tempColor(b: BatteryAnalytics.TempBand) = when (b) {
     BatteryAnalytics.TempBand.WARM -> Cell.Warn; BatteryAnalytics.TempBand.HOT -> Cell.Bad
     BatteryAnalytics.TempBand.UNKNOWN -> Cell.TextMuted
 }
+private fun levelColor(l: BatteryAnalytics.Level) = when (l) {
+    BatteryAnalytics.Level.GOOD -> Cell.Good
+    BatteryAnalytics.Level.WATCH -> Cell.Warn
+    BatteryAnalytics.Level.BAD -> Cell.Bad
+    BatteryAnalytics.Level.INFO -> Cell.TextPrimary
+}
 private fun orbColors(level: Int): Pair<Color, Color> = when {
     level <= 15 -> Cell.Bad to Color(0xFF7E2F24)
     level <= 30 -> Cell.Warn to Color(0xFF6E4A2A)
@@ -106,6 +117,45 @@ private fun chartPoints(history: List<HistoryPoint>, selector: (HistoryPoint) ->
     if (raw.isEmpty()) return emptyList()
     val t0 = raw.first().first
     return raw.map { (ts, v) -> ((ts - t0) / 86_400_000.0).toFloat() to v.toFloat() }
+}
+
+/** Map a forecast curve (epochMs, value) into a fresh "days since now" x-space for its
+ *  own dedicated chart, so it never squashes the measured-history axis. */
+private fun projectionPoints(curve: List<Pair<Long, Double>>): List<Pair<Float, Float>> {
+    if (curve.size < 2) return emptyList()
+    val t0 = curve.first().first
+    return curve.map { (ts, v) -> ((ts - t0) / 86_400_000.0).toFloat() to v.toFloat() }
+}
+
+@Composable
+private fun TriStat(value: String, label: String, color: Color = Cell.TextPrimary) {
+    Column {
+        Text(value, color = color, fontFamily = Mono, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text(label.uppercase(), color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.sp, letterSpacing = 0.6.sp)
+    }
+}
+
+@Composable
+private fun SourceCol(label: String, value: String, note: String, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier.padding(horizontal = 4.dp)) {
+        SectionLabel(label)
+        Text(value, color = color, fontFamily = Mono, fontSize = 21.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
+        Text(note, color = Cell.TextMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@Composable
+private fun VDivider() {
+    Box(Modifier.width(1.dp).height(46.dp).background(Cell.Border))
+}
+
+@Composable
+private fun EnduranceRow(label: String, value: String, color: Color) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Cell.TextSecondary, fontSize = 13.sp)
+        Text(value, color = color, fontFamily = Mono, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
 }
 private fun startOfToday(): Long = Calendar.getInstance().apply {
     set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
@@ -128,10 +178,21 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
         val level = snapshot?.levelPct ?: 0
         val (top, bottom) = orbColors(level)
         val status = snapshot?.status ?: "—"
-        val rate = BatteryAnalytics.chargeRate(snapshot?.currentUa, status)
+        val chargeRateLbl = BatteryAnalytics.chargeRate(snapshot?.currentUa, status)
+
+        // Discharge slope + runtime, computed up front so the orb, the endurance card
+        // and the charge-today forecast all share the same rate.
+        val nowTs = snapshot?.timestampMs ?: System.currentTimeMillis()
+        val recentSoc = socLog.filter { it.timestampMs >= nowTs - 90 * 60_000L }.map { it.timestampMs to it.levelPct }
+        val dischargeRate = BatteryAnalytics.dischargeRatePctPerHour(recentSoc)
+        val runtimeMs = BatteryAnalytics.runtimeLeftMs(level, dischargeRate)
+            ?: BatteryAnalytics.instantaneousRuntimeMs(snapshot?.chargeCounterUah, snapshot?.currentUa, status)
+
         val statusLine = when {
-            status == "Charging" && rate != "—" -> "Charging · $rate"
-            status == "Full" -> "Full"; status == "Charging" -> "Charging"
+            status == "Charging" && chargeRateLbl != "—" -> "Charging · $chargeRateLbl"
+            status == "Full" -> "Full"
+            status == "Charging" -> "Charging"
+            dischargeRate != null && dischargeRate >= 0.5 -> "−${dischargeRate.roundToInt()}% / h"
             else -> "On battery"
         }
         Appear {
@@ -157,15 +218,26 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
             }
         }
 
-        // Endurance: time left at the recent discharge slope, with an instantaneous fallback.
-        val runtimeMs = run {
-            val nowTs = snapshot?.timestampMs ?: System.currentTimeMillis()
-            val recent = socLog.filter { it.timestampMs >= nowTs - 90 * 60_000L }.map { it.timestampMs to it.levelPct }
-            val rate = BatteryAnalytics.dischargeRatePctPerHour(recent)
-            BatteryAnalytics.runtimeLeftMs(level, rate)
-                ?: BatteryAnalytics.instantaneousRuntimeMs(snapshot?.chargeCounterUah, snapshot?.currentUa, status)
-        }
-        if (status == "Discharging" && runtimeMs != null) {
+        // "Lasts for" at light / normal / heavy use (mockup 2c), scaled off the recent drain.
+        if (status == "Discharging" && dischargeRate != null && dischargeRate > 0.0) {
+            val lightMs = BatteryAnalytics.runtimeLeftMs(level, dischargeRate * 0.4)
+            val normalMs = BatteryAnalytics.runtimeLeftMs(level, dischargeRate)
+            val heavyMs = BatteryAnalytics.runtimeLeftMs(level, dischargeRate * 2.6)
+            Spacer(Modifier.height(16.dp))
+            Appear(60) {
+                SurfaceCard {
+                    Column {
+                        SectionLabel("Lasts for")
+                        Spacer(Modifier.height(6.dp))
+                        EnduranceRow("Light use", Fmt.duration(lightMs), Cell.Good)
+                        EnduranceRow("Normal use", Fmt.duration(normalMs), Cell.TextPrimary)
+                        EnduranceRow("Heavy use", Fmt.duration(heavyMs), Cell.Warn)
+                        Text("Estimated from your recent drain — actual time varies with what you do.",
+                            color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
+        } else if (status == "Discharging" && runtimeMs != null) {
             Spacer(Modifier.height(16.dp))
             Appear(60) {
                 SurfaceCard {
@@ -182,31 +254,53 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
 
         val band = BatteryAnalytics.tempBand(snapshot?.temperatureC)
         val power = BatteryAnalytics.powerWatts(snapshot?.voltageV, snapshot?.currentUa)
+        val vR = BatteryAnalytics.voltageReading(snapshot?.voltageV)
+        val cR = BatteryAnalytics.currentReading(snapshot?.currentUa, status)
+        val pR = BatteryAnalytics.powerReading(power)
         Spacer(Modifier.height(20.dp))
         Appear(80) {
             Column {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    VitalTile("Temperature", snapshot?.temperatureC?.let { String.format(Locale.US, "%.1f°C", it) } ?: "—", band.label, Modifier.weight(1f), accent = tempColor(band))
-                    VitalTile("Voltage", snapshot?.voltageV?.let { String.format(Locale.US, "%.2f V", it) } ?: "—", "", Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    VitalTile("Temperature", snapshot?.temperatureC?.let { String.format(Locale.US, "%.1f°C", it) } ?: "—", band.label,
+                        Modifier.weight(1f).fillMaxHeight(), accent = tempColor(band))
+                    VitalTile("Voltage", snapshot?.voltageV?.let { String.format(Locale.US, "%.2f V", it) } ?: "—", vR.note,
+                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(vR.level))
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    VitalTile("Current", snapshot?.currentUa?.let { "${kotlin.math.abs(it / 1000)} mA" } ?: "—", if (status == "Charging") "charging" else "draw", Modifier.weight(1f))
-                    VitalTile("Power", power?.let { String.format(Locale.US, "%.1f W", it) } ?: "—", "", Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    VitalTile("Current", snapshot?.currentUa?.let { "${kotlin.math.abs(it / 1000)} mA" } ?: "—", cR.note,
+                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(cR.level))
+                    VitalTile("Power", power?.let { String.format(Locale.US, "%.1f W", it) } ?: "—", pR.note,
+                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(pR.level))
                 }
             }
         }
 
         val todayPts = socToday(socLog)
         if (todayPts.size >= 2) {
+            // Rest-of-day drain projection (dashed, capped at 8h) when discharging.
+            val drainRaw = if (status == "Discharging" && dischargeRate != null && dischargeRate > 0.0)
+                DrainForecaster.restOfDayCurve(nowTs, level, dischargeRate, horizonMs = 8 * 3_600_000L) else emptyList()
+            val drainFc = drainRaw.map { (ts, soc) -> ((ts - startOfToday()) / 3_600_000f) to soc.toFloat() }
+            val drainEndMs = drainRaw.lastOrNull()?.first
+            val reachesEmpty = (drainRaw.lastOrNull()?.second ?: 1.0) <= 0.0
             Spacer(Modifier.height(12.dp))
             Appear(140) {
                 SurfaceCard {
                     Column {
-                        SectionLabel("Charge today")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            SectionLabel("Charge today")
+                            if (drainFc.isNotEmpty()) SectionLabel("— — forecast", color = Cell.Accent)
+                        }
                         Spacer(Modifier.height(10.dp))
                         TimeSeriesChart(todayPts, height = 108.dp, yFormat = { "${it.toInt()}%" },
-                            xStart = Fmt.time(socLog.firstOrNull { it.timestampMs >= startOfToday() }?.timestampMs), xEnd = "now")
+                            xStart = Fmt.time(socLog.firstOrNull { it.timestampMs >= startOfToday() }?.timestampMs),
+                            xEnd = when {
+                                drainFc.isEmpty() -> "now"
+                                reachesEmpty && drainEndMs != null -> "~${Fmt.time(drainEndMs)}"
+                                else -> "8h+"
+                            },
+                            forecast = drainFc.ifEmpty { null })
                     }
                 }
             }
@@ -235,7 +329,7 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
 
 // ── Health ───────────────────────────────────────────────────────────────────
 @Composable
-fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<HistoryPoint>) {
+fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<HistoryPoint>, forecast: SohForecaster.Forecast? = null) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             SectionLabel("State of Health")
@@ -310,21 +404,26 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             Spacer(Modifier.height(20.dp))
             SurfaceCard {
                 Column {
-                    SectionLabel("Measured vs modeled")
-                    Spacer(Modifier.height(12.dp))
+                    SectionLabel("State of Health · three sources")
+                    Spacer(Modifier.height(14.dp))
                     val measured = analysis.sohPct
                     val srcSub = when (analysis.capacitySource) {
                         CapacitySource.GAUGE -> "fuel gauge"
                         CapacitySource.SESSION -> "${analysis.sessionCount} sessions"
-                        CapacitySource.ESTIMATE -> "1 reading"
+                        CapacitySource.ESTIMATE -> "estimate"
                         else -> ""
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        VitalTile("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub, Modifier.weight(1f),
-                            accent = analysis.let { conditionColor(it.condition) }, bg = Cell.SurfaceHi)
-                        VitalTile("Modeled", "${modeled.toInt()}%", "typical wear", Modifier.weight(1f),
-                            accent = Cell.TextSecondary, bg = Cell.SurfaceHi)
+                    val gaugeAvail = snapshot?.sysfsAvailable == true
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                        SourceCol("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub,
+                            conditionColor(analysis.condition), Modifier.weight(1f))
+                        VDivider()
+                        SourceCol("Modeled", "${modeled.toInt()}%", "simSES", Cell.Cool, Modifier.weight(1f))
+                        VDivider()
+                        SourceCol("Gauge", if (gaugeAvail) (measured?.let { "${it.toInt()}%" } ?: "—") else "—",
+                            if (gaugeAvail) "fuel IC" else "needs root", Cell.TextSecondary, Modifier.weight(1f))
                     }
+                    Spacer(Modifier.height(4.dp))
                     if (measured != null) {
                         val delta = measured - modeled
                         Text(
@@ -351,7 +450,23 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             SurfaceCard {
                 Column {
                     SectionLabel("What's wearing it")
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(12.dp))
+                    val cal = if (analysis.modeledHasCalendar) (analysis.modeledCalendarLossPct ?: 0.0) else 0.0
+                    val total = (cal + cyc).coerceAtLeast(0.001)
+                    val calFrac = (cal / total).toFloat()
+                    Row(Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(8.dp))) {
+                        if (calFrac > 0.02f) Box(Modifier.weight(calFrac).fillMaxHeight().background(Cell.AccentDeep), contentAlignment = Alignment.Center) {
+                            Text("${cal.roundToInt()}% cal", color = Cell.OnTile, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Box(Modifier.weight((1f - calFrac).coerceAtLeast(0.02f)).fillMaxHeight().background(Cell.Warn), contentAlignment = Alignment.Center) {
+                            Text("${cyc.roundToInt()}% cyc", color = Cell.OnTile, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Calendar · age + heat", color = Cell.TextFaint, fontSize = 11.sp)
+                        Text("Cyclic · throughput", color = Cell.TextFaint, fontSize = 11.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
                     KeyValueRow("From charge cycles", String.format(Locale.US, "−%.1f pts", cyc))
                     if (analysis.modeledHasCalendar) {
                         KeyValueRow("From age & heat", String.format(Locale.US, "−%.1f pts", analysis.modeledCalendarLossPct ?: 0.0))
@@ -376,13 +491,50 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
             }
         }
-        analysis?.etaSohMs?.let { eta ->
+        forecast?.takeIf { it.method != SohForecaster.Method.NONE }?.let { fc ->
             Spacer(Modifier.height(14.dp))
             SurfaceCard {
                 Column {
-                    SectionLabel("Looking ahead", color = Cell.Accent)
-                    Text("At its lifetime-average rate, this battery reaches 80% around ${Fmt.date(eta)}.",
-                        color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
+                    SectionLabel("Forecast", color = Cell.Accent)
+                    if (fc.etaDateMs != null) {
+                        Text("At your recent rate, capacity may reach 80% around ${Fmt.date(fc.etaDateMs)}.",
+                            color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp,
+                            modifier = Modifier.padding(top = 8.dp))
+                        val lo = fc.etaLowMs; val hi = fc.etaHighMs
+                        if (lo != null && hi != null && Fmt.date(lo) != Fmt.date(hi)) {
+                            Text("Likely range: ${Fmt.date(lo)} – ${Fmt.date(hi)}.",
+                                color = Cell.TextMuted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 3.dp))
+                        }
+                        val projPts = projectionPoints(fc.curve)
+                        if (projPts.size >= 2) {
+                            Spacer(Modifier.height(12.dp))
+                            TimeSeriesChart(projPts, height = 96.dp, yFormat = { "${it.toInt()}%" },
+                                xStart = "now", xEnd = Fmt.date(fc.etaDateMs),
+                                threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%", lineColor = Cell.Accent)
+                        }
+                    } else {
+                        Text("Aging slowly — not projected to reach 80% within the next five years.",
+                            color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp,
+                            modifier = Modifier.padding(top = 8.dp))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        TriStat(fc.fadePerYearPct?.let { if (it < 0.05) "≈0%" else String.format(Locale.US, "-%.1f%%", it) } ?: "—", "loss / yr")
+                        TriStat(fc.etaDateMs?.let { Fmt.date(it) } ?: ">5 yr", "hits 80%")
+                        TriStat(fc.r2?.let { String.format(Locale.US, "%.2f", it) } ?: "—", "fit R²")
+                    }
+                    val s = fc.scaleVsModel
+                    val aging = when {
+                        s == null -> null
+                        s >= 1.08 -> "Your battery is aging a little faster than a typical one."
+                        s <= 0.92 -> "Your battery is aging a little slower than a typical one."
+                        else -> "Your battery is aging about as expected."
+                    }
+                    aging?.let {
+                        Text(it, color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 12.dp))
+                    }
+                    Text("An on-device trend projection from your history, not a guarantee — it shifts with temperature and how you charge.",
+                        color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp))
                 }
             }
         }
@@ -530,7 +682,7 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                 Text("Cellspan records a health sample about every 6 hours and each time you open the app, plus a daily summary of temperature, voltage, current and cycles. Live vitals refresh about once a minute while the app is open.",
                     color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
                 Spacer(Modifier.height(8.dp))
-                Text("Health samples, daily summaries, charge sessions and daily usage are kept on the phone indefinitely for long-term trends; only the 3-day high-resolution live log is trimmed. Export saves it all to a JSON file so your history survives an uninstall or a new phone.",
+                Text("It lives in Cellspan's private on-device database (cellspan.db). Health samples, daily summaries, charge sessions and daily usage are kept indefinitely — years of history fit easily; only the 3-day high-resolution live log is trimmed. To analyse it later, even a full 2 years on, tap Export to pull the whole dataset as one JSON file (it also lets your history survive an uninstall or a new phone).",
                     color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(14.dp))
                 Box(

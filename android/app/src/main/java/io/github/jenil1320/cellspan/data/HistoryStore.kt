@@ -202,6 +202,23 @@ class HistoryStore(context: Context) :
         }
 
     /**
+     * A stable displayed capacity: the median of the most recent [n] stored capacities
+     * plus the live reading. The instantaneous estimate (charge ÷ level) jitters with the
+     * coarse integer battery level; the median cancels that so the headline number stops
+     * bouncing between refreshes.
+     */
+    fun medianCapacityMah(currentMah: Int, n: Int = 15): Int {
+        val vals = ArrayList<Int>()
+        readableDatabase.rawQuery(
+            "SELECT capacity_mah FROM samples WHERE capacity_mah IS NOT NULL ORDER BY ts DESC LIMIT ?",
+            arrayOf(n.toString())
+        ).use { c -> while (c.moveToNext()) vals.add(c.getInt(0)) }
+        vals.add(currentMah)
+        vals.sort()
+        return vals[vals.size / 2]
+    }
+
+    /**
      * Serialise every long-term table to JSON for the user to save externally, so the
      * history survives an uninstall or device change (all these tables are kept forever
      * on-device; only the high-resolution soc_log is pruned). One self-describing object

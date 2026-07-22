@@ -109,4 +109,18 @@ object DegradationModel {
             hasCalendar = hasCalendar,
         )
     }
+
+    /**
+     * Raw (unclamped) cyclic capacity-loss fraction the model predicts at a given cycle
+     * count. Monotone increasing in cycles, so the SoH forecaster can bisect it to find
+     * the projected 80% crossing. Uses the same fixed cycle-mean voltage as [estimate].
+     */
+    fun cyclicLossFrac(equivalentFullCycles: Double, designCapacityMah: Int?, avgDoD: Double? = null): Double {
+        if (equivalentFullCycles <= 0.0 || designCapacityMah == null || designCapacityMah <= 0) return 0.0
+        val v = DEFAULT_CYCLE_V
+        val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.0, 1.0)
+        val beta = 7.348e-3 * (v - 3.667).pow(2) + 7.6e-4 + 4.081e-3 * dod
+        val throughputAh = equivalentFullCycles * (designCapacityMah / 1000.0)
+        return beta * sqrt(throughputAh)
+    }
 }
