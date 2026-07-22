@@ -224,15 +224,22 @@ class HistoryStore(context: Context) :
      * on-device; only the high-resolution soc_log is pruned). One self-describing object
      * with an array per table — trivially parseable months or years later.
      */
-    fun exportJson(nowMs: Long): String {
+    fun exportJson(nowMs: Long, sinceMs: Long = 0L, untilMs: Long = Long.MAX_VALUE): String {
         val db = readableDatabase
         fun num(c: android.database.Cursor, i: Int) = if (c.isNull(i)) "null" else c.getString(i)
+        // Optional time window. Timestamp tables filter on ts; the per-day tables filter
+        // on the yyyy-MM-dd day string. All bounds are bound parameters (no injection).
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val sinceDay = if (sinceMs > 0L) fmt.format(java.util.Date(sinceMs)) else "0000-00-00"
+        val untilDay = if (untilMs < Long.MAX_VALUE) fmt.format(java.util.Date(untilMs)) else "9999-12-31"
+        val tsArgs = arrayOf(sinceMs.toString(), untilMs.toString())
+        val dayArgs = arrayOf(sinceDay, untilDay)
         val sb = StringBuilder()
         sb.append("{\n")
-        sb.append("\"app\":\"cellspan\",\"schema\":$DB_VERSION,\"exported_ms\":$nowMs,\n")
+        sb.append("\"app\":\"cellspan\",\"schema\":$DB_VERSION,\"exported_ms\":$nowMs,\"since_ms\":$sinceMs,\n")
 
         sb.append("\"samples\":[")
-        db.rawQuery("SELECT ts,soh,cycles,capacity_mah,level,temp_c FROM samples ORDER BY ts", null).use { c ->
+        db.rawQuery("SELECT ts,soh,cycles,capacity_mah,level,temp_c FROM samples WHERE ts BETWEEN ? AND ? ORDER BY ts", tsArgs).use { c ->
             var first = true
             while (c.moveToNext()) {
                 if (!first) sb.append(","); first = false
@@ -241,7 +248,7 @@ class HistoryStore(context: Context) :
             }
         }
         sb.append("],\n\"daily_vitals\":[")
-        db.rawQuery("SELECT day,temp_min,temp_max,temp_sum,temp_n,volt_sum,volt_n,curr_sum,curr_n,cycles FROM daily_vitals ORDER BY day", null).use { c ->
+        db.rawQuery("SELECT day,temp_min,temp_max,temp_sum,temp_n,volt_sum,volt_n,curr_sum,curr_n,cycles FROM daily_vitals WHERE day BETWEEN ? AND ? ORDER BY day", dayArgs).use { c ->
             var first = true
             while (c.moveToNext()) {
                 if (!first) sb.append(","); first = false
@@ -254,7 +261,7 @@ class HistoryStore(context: Context) :
             }
         }
         sb.append("],\n\"daily_usage\":[")
-        db.rawQuery("SELECT day,discharged FROM daily_usage ORDER BY day", null).use { c ->
+        db.rawQuery("SELECT day,discharged FROM daily_usage WHERE day BETWEEN ? AND ? ORDER BY day", dayArgs).use { c ->
             var first = true
             while (c.moveToNext()) {
                 if (!first) sb.append(","); first = false
@@ -262,7 +269,7 @@ class HistoryStore(context: Context) :
             }
         }
         sb.append("],\n\"capacity_sessions\":[")
-        db.rawQuery("SELECT ts,start_level,end_level,measured_mah FROM capacity_sessions ORDER BY ts", null).use { c ->
+        db.rawQuery("SELECT ts,start_level,end_level,measured_mah FROM capacity_sessions WHERE ts BETWEEN ? AND ? ORDER BY ts", tsArgs).use { c ->
             var first = true
             while (c.moveToNext()) {
                 if (!first) sb.append(","); first = false

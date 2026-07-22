@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -156,6 +157,12 @@ private fun EnduranceRow(label: String, value: String, color: Color) {
         Text(label, color = Cell.TextSecondary, fontSize = 13.sp)
         Text(value, color = color, fontFamily = Mono, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
+}
+
+/** How far back the data export reaches. */
+private enum class ExportRange(val label: String, val days: Int?) {
+    WEEK("7 days", 7), MONTH("30 days", 30), YEAR("1 year", 365), ALL("All", null);
+    fun sinceMs(nowMs: Long): Long = days?.let { nowMs - it * 86_400_000L } ?: 0L
 }
 private fun startOfToday(): Long = Calendar.getInstance().apply {
     set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
@@ -669,10 +676,12 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
         // Data cadence + export so history survives an uninstall / new phone.
         val ctx = LocalContext.current
         val scope = rememberCoroutineScope()
+        var range by remember { mutableStateOf(ExportRange.ALL) }
         val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             if (uri != null) scope.launch(Dispatchers.IO) {
                 val ok = runCatching {
-                    val json = HistoryStore(ctx).use { it.exportJson(System.currentTimeMillis()) }
+                    val now = System.currentTimeMillis()
+                    val json = HistoryStore(ctx).use { it.exportJson(now, range.sinceMs(now)) }
                     val stream = ctx.contentResolver.openOutputStream(uri) ?: error("no output stream")
                     stream.use { os -> os.write(json.toByteArray()) }
                 }.isSuccess
@@ -689,8 +698,26 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                 Text("Cellspan records a health sample about every 6 hours and each time you open the app, plus a daily summary of temperature, voltage, current and cycles. Live vitals refresh about once a minute while the app is open.",
                     color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
                 Spacer(Modifier.height(8.dp))
-                Text("It stays in Cellspan's private on-device space and is kept for years (only the 3-day live log is trimmed). Tap Export to save all your battery usage data — every reading with its timestamp — to a file you can keep, open later, or move to a new phone.",
+                Text("It stays in Cellspan's private on-device space and is kept for years (only the 3-day live log is trimmed). Export saves your battery usage data — every reading with its timestamp — to a file you can keep, open later, or move to a new phone. Choose how far back to include, or export everything.",
                     color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
+                Spacer(Modifier.height(12.dp))
+                Text("EXPORT RANGE", color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.4.sp)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    ExportRange.entries.forEach { r ->
+                        val sel = r == range
+                        Box(
+                            Modifier.clip(RoundedCornerShape(8.dp))
+                                .background(if (sel) Cell.AccentSoft else Cell.SurfaceHi)
+                                .border(1.dp, if (sel) Cell.BorderAccent else Cell.Border, RoundedCornerShape(8.dp))
+                                .clickable { range = r }
+                                .padding(horizontal = 12.dp, vertical = 7.dp),
+                        ) {
+                            Text(r.label, color = if (sel) Cell.Accent else Cell.TextMuted, fontSize = 12.sp,
+                                fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal)
+                        }
+                    }
+                }
                 Spacer(Modifier.height(14.dp))
                 Box(
                     Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
