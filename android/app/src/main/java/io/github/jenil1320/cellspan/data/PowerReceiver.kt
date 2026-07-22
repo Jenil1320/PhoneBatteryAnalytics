@@ -20,22 +20,35 @@ class PowerReceiver : BroadcastReceiver() {
         Thread {
             try {
                 val snap = BatteryReader.read(app)
-                val cc = snap.chargeCounterUah ?: return@Thread
-                when (action) {
+                val cc = snap.chargeCounterUah          // may be null on some devices
+                val nowTs = snap.timestampMs
+                val nowCharging = action == Intent.ACTION_POWER_CONNECTED
+
+                // Close the current charge/discharge segment into a History session, then
+                // open the opposite one. Works even without the fuel-gauge charge counter
+                // (the mAh delta is just left unknown).
+                SegmentTracker.current(app)?.let { seg ->
+                    val delta = if (cc != null && seg.startCc != null) cc - seg.startCc else null
+                    HistoryStore(app).use {
+                        it.recordSession(seg.startTs, nowTs, seg.startLevel, snap.levelPct, delta, seg.isCharge)
+                    }
+                }
+                SegmentTracker.begin(app, nowTs, snap.levelPct, cc, nowCharging)
+
+                // Session-based capacity measurement (needs the fuel-gauge charge counter).
+                if (cc != null) when (action) {
                     Intent.ACTION_POWER_CONNECTED ->
-                        SessionTracker.begin(app, cc, snap.levelPct, snap.timestampMs)
+                        SessionTracker.begin(app, cc, snap.levelPct, nowTs)
 
                     Intent.ACTION_POWER_DISCONNECTED -> {
                         if (SessionTracker.active(app)) {
                             val startCc = SessionTracker.startCc(app)
                             val startLevel = SessionTracker.startLevel(app)
                             if (startCc > 0 && startLevel in 0..100) {
-                                val measured = BatteryAnalytics.measuredCapacityMah(
-                                    startCc, cc, startLevel, snap.levelPct,
-                                )
+                                val measured = BatteryAnalytics.measuredCapacityMah(startCc, cc, startLevel, snap.levelPct)
                                 if (measured != null && measured in 1000..12000) {
                                     HistoryStore(app).use {
-                                        it.insertSession(snap.timestampMs, startLevel, snap.levelPct, measured)
+                                        it.insertSession(nowTs, startLevel, snap.levelPct, measured)
                                     }
                                 }
                             }

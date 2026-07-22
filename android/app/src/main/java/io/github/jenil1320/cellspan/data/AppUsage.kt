@@ -10,6 +10,16 @@ import android.os.Process
 /** An app ranked by visible foreground time in a window (matches Digital Wellbeing). */
 data class UsageItem(val label: String, val foregroundMs: Long)
 
+/** Friendly names for common system packages whose label can't be resolved directly. */
+private val FRIENDLY = mapOf(
+    "com.google.android.apps.nexuslauncher" to "Home screen",
+    "com.android.systemui" to "System UI",
+    "com.google.android.gms" to "Google services",
+    "com.google.android.googlequicksearchbox" to "Google",
+    "com.android.chrome" to "Chrome",
+    "com.android.settings" to "Settings",
+)
+
 /**
  * Per-app visible screen time via [UsageStatsManager.queryEvents], pairing each
  * foreground event with its next background event. This matches how Digital
@@ -57,7 +67,7 @@ object AppUsage {
 
         val pm = context.packageManager
         fg.entries.filter { it.value > 0 }.sortedByDescending { it.value }.take(limit).map { (pkg, ms) ->
-            val label = try {
+            val label = FRIENDLY[pkg] ?: try {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             } catch (e: Exception) { pkg.substringAfterLast('.') }
             UsageItem(label, ms)

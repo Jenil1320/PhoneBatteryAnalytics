@@ -14,6 +14,7 @@ import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.DailyVital
 import io.github.jenil1320.cellspan.data.HistoryStore
 import io.github.jenil1320.cellspan.data.HistoryPoint
+import io.github.jenil1320.cellspan.data.Session
 import io.github.jenil1320.cellspan.data.SocPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,7 @@ data class UiState(
     val socLog: List<SocPoint> = emptyList(),
     val dailyVitals: List<DailyVital> = emptyList(),
     val sohForecast: SohForecaster.Forecast? = null,
+    val sessions: List<Session> = emptyList(),
 )
 
 private const val TREND_DAYS = 31
@@ -57,6 +59,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             var usage: List<Pair<String, Double>> = emptyList()
             var socLog: List<SocPoint> = emptyList()
             var vitals: List<DailyVital> = emptyList()
+            var sessions: List<Session> = emptyList()
             try {
                 HistoryStore(getApplication()).use { store ->
                     vitals = store.dailyVitals(TREND_DAYS)
@@ -79,12 +82,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     history = store.recent()
                     usage = store.dailyUsage(7)
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
+                    sessions = store.recentSessions(20)
                 }
             } catch (e: Exception) {
                 // history is best-effort; never let it crash the app
             }
             val forecast = runCatching { buildForecast(history, analysis, now) }.getOrNull()
-            _state.value = UiState(false, snapshot, analysis, history, usage, socLog, vitals, forecast)
+            _state.value = UiState(false, snapshot, analysis, history, usage, socLog, vitals, forecast, sessions)
         }
     }
 

@@ -36,6 +36,16 @@ data class DailyVital(
     val cycles: Int?,
 )
 
+/** One charge or discharge session (a continuous span between power plug events). */
+data class Session(
+    val startMs: Long,
+    val endMs: Long,
+    val startLevel: Int,
+    val endLevel: Int,
+    val chargeDeltaUah: Long?,   // signed µAh moved (+charge / −discharge), null if unknown
+    val isCharge: Boolean,
+)
+
 /**
  * Local, on-device history of battery readings. Plain SQLite (no annotation
  * processing) so the app has no code-gen build steps.
@@ -63,6 +73,7 @@ class HistoryStore(context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_soc_ts ON soc_log(ts)")
         db.execSQL(SESSIONS_DDL)
         db.execSQL(DAILY_VITALS_DDL)
+        db.execSQL(USE_SESSIONS_DDL)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldV: Int, newV: Int) {
@@ -76,6 +87,7 @@ class HistoryStore(context: Context) :
         }
         if (oldV < 5) db.execSQL(SESSIONS_DDL)
         if (oldV < 6) db.execSQL(DAILY_VITALS_DDL)
+        if (oldV < 7) db.execSQL(USE_SESSIONS_DDL)
     }
 
     fun insert(snapshot: BatterySnapshot, analysis: Analysis) {
@@ -327,9 +339,44 @@ class HistoryStore(context: Context) :
         return out
     }
 
+    /**
+     * Record one completed charge/discharge session. Skips implausibly short spans
+     * (< 90 s) and bad level bounds so the History list stays meaningful.
+     */
+    fun recordSession(startMs: Long, endMs: Long, startLevel: Int, endLevel: Int, chargeDeltaUah: Long?, isCharge: Boolean) {
+        if (endMs - startMs < 90_000L) return
+        if (startLevel !in 0..100 || endLevel !in 0..100) return
+        val values = ContentValues().apply {
+            put("start_ts", startMs); put("end_ts", endMs)
+            put("start_level", startLevel); put("end_level", endLevel)
+            chargeDeltaUah?.let { put("charge_delta_uah", it) }
+            put("kind", if (isCharge) "charge" else "discharge")
+        }
+        writableDatabase.insert("sessions", null, values)
+    }
+
+    /** The most recent [n] sessions, newest first. */
+    fun recentSessions(n: Int = 20): List<Session> {
+        val out = ArrayList<Session>()
+        readableDatabase.rawQuery(
+            "SELECT start_ts, end_ts, start_level, end_level, charge_delta_uah, kind FROM sessions ORDER BY end_ts DESC LIMIT ?",
+            arrayOf(n.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(Session(
+                    startMs = c.getLong(0), endMs = c.getLong(1),
+                    startLevel = c.getInt(2), endLevel = c.getInt(3),
+                    chargeDeltaUah = if (c.isNull(4)) null else c.getLong(4),
+                    isCharge = c.getString(5) == "charge",
+                ))
+            }
+        }
+        return out
+    }
+
     companion object {
         private const val DB_NAME = "cellspan.db"
-        private const val DB_VERSION = 6
+        private const val DB_VERSION = 7
         private const val SOC_RETENTION_MS = 3L * 24 * 60 * 60 * 1000  // keep ~3 days
         private const val DAILY_USAGE_DDL =
             "CREATE TABLE IF NOT EXISTS daily_usage (day TEXT PRIMARY KEY, discharged REAL NOT NULL DEFAULT 0)"
@@ -341,5 +388,9 @@ class HistoryStore(context: Context) :
             "CREATE TABLE IF NOT EXISTS daily_vitals (day TEXT PRIMARY KEY, temp_min REAL, temp_max REAL, " +
                 "temp_sum REAL, temp_n INTEGER NOT NULL DEFAULT 0, volt_sum REAL, volt_n INTEGER NOT NULL DEFAULT 0, " +
                 "curr_sum REAL, curr_n INTEGER NOT NULL DEFAULT 0, cycles INTEGER)"
+        private const val USE_SESSIONS_DDL =
+            "CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ts INTEGER NOT NULL, " +
+                "end_ts INTEGER NOT NULL, start_level INTEGER NOT NULL, end_level INTEGER NOT NULL, " +
+                "charge_delta_uah INTEGER, kind TEXT NOT NULL)"
     }
 }

@@ -40,8 +40,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.jenil1320.cellspan.ui.DiagnoseScreen
-import io.github.jenil1320.cellspan.ui.DrainsScreen
 import io.github.jenil1320.cellspan.ui.HealthScreen
+import io.github.jenil1320.cellspan.ui.HistoryScreen
 import io.github.jenil1320.cellspan.ui.MainViewModel
 import io.github.jenil1320.cellspan.ui.NowScreen
 import io.github.jenil1320.cellspan.ui.TrendsScreen
@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Tab(val label: String) {
-    NOW("Now"), HEALTH("Health"), TRENDS("Trends"), DRAINS("Drains"), DIAGNOSE("Diagnose")
+    NOW("Now"), HEALTH("Health"), TRENDS("Trends"), HISTORY("History"), DIAGNOSE("Diagnose")
 }
 
 @Composable
@@ -89,7 +89,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage, state.socLog)
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast)
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
-                Tab.DRAINS -> DrainsScreen()
+                Tab.HISTORY -> HistoryScreen(state.sessions)
                 Tab.DIAGNOSE -> DiagnoseScreen(state.snapshot, state.analysis)
             }
         }
