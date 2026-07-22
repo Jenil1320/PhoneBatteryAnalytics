@@ -14,12 +14,14 @@ class CellspanApp : Application() {
         super.onCreate()
         // Notification channel for the charge alarm.
         ChargeAlarm.ensureChannel(this)
-        // Record a battery sample a few times a day so trends build over time.
-        val request = PeriodicWorkRequestBuilder<SampleWorker>(6, TimeUnit.HOURS)
+        // Record a battery sample about once an hour so the charts fill in even when
+        // the app isn't open. UPDATE (not KEEP) so the new cadence replaces the old
+        // 6-hour schedule on existing installs. Android may still batch this under Doze.
+        val request = PeriodicWorkRequestBuilder<SampleWorker>(1, TimeUnit.HOURS)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "cellspan-sample",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request,
         )
     }

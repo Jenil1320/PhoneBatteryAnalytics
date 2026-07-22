@@ -33,6 +33,11 @@ class SampleWorker(context: Context, params: WorkerParameters) :
             // build even when the app is never opened.
             store.recordVitals(day, snapshot.temperatureC, snapshot.voltageV,
                 snapshot.currentUa?.let { (it / 1000).toInt() }, snapshot.cycleCount)
+            // Also drop a live point so the intra-day temperature/voltage/current
+            // charts fill in between app opens (previously only refreshed while open).
+            store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
+                snapshot.voltageV?.let { (it * 1000).toInt() },
+                snapshot.currentUa?.let { (it / 1000).toInt() })
         }
         Result.success()
     } catch (e: Exception) {

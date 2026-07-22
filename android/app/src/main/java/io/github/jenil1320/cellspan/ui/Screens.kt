@@ -427,7 +427,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             Spacer(Modifier.height(20.dp))
             SurfaceCard {
                 Column {
-                    SectionLabel("State of Health · three sources")
+                    SectionLabel("Measured vs modeled")
                     Spacer(Modifier.height(14.dp))
                     val measured = analysis.sohPct
                     val srcSub = when (analysis.capacitySource) {
@@ -436,15 +436,11 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         CapacitySource.ESTIMATE -> "estimate"
                         else -> ""
                     }
-                    val gaugeAvail = snapshot?.sysfsAvailable == true
                     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                         SourceCol("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub,
                             conditionColor(analysis.condition), Modifier.weight(1f))
                         VDivider()
                         SourceCol("Modeled", "${modeled.toInt()}%", "typical", Cell.Cool, Modifier.weight(1f))
-                        VDivider()
-                        SourceCol("Gauge", if (gaugeAvail) (measured?.let { "${it.toInt()}%" } ?: "—") else "—",
-                            if (gaugeAvail) "fuel IC" else "needs root", Cell.TextSecondary, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(4.dp))
                     if (measured != null) {
