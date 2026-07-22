@@ -6,9 +6,15 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Build
 import android.os.Process
+import kotlin.math.roundToInt
 
-/** An app ranked by visible foreground time in a window (matches Digital Wellbeing). */
-data class UsageItem(val label: String, val foregroundMs: Long)
+/**
+ * An app ranked by visible foreground time in a window (matches Digital Wellbeing),
+ * with a rough estimated battery use in mAh (foreground time × the device's screen
+ * power) when the power profile is available. The mAh is an estimate, not a
+ * measurement — exact per-app figures need a privileged permission apps can't hold.
+ */
+data class UsageItem(val label: String, val foregroundMs: Long, val estMah: Int? = null)
 
 /** Friendly names for common system packages whose label can't be resolved directly. */
 private val FRIENDLY = mapOf(
@@ -66,11 +72,14 @@ object AppUsage {
         fg.remove(context.packageName)
 
         val pm = context.packageManager
+        // Device screen power (mA) → rough per-app mAh = screenMa × foreground hours.
+        val screenMa = PowerProfileReader.screenMilliAmps(context)
         fg.entries.filter { it.value > 0 }.sortedByDescending { it.value }.take(limit).map { (pkg, ms) ->
             val label = FRIENDLY[pkg] ?: try {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             } catch (e: Exception) { pkg.substringAfterLast('.') }
-            UsageItem(label, ms)
+            val estMah = screenMa?.let { (it * (ms / 3_600_000.0)).roundToInt() }?.takeIf { it > 0 }
+            UsageItem(label, ms, estMah)
         }
     } catch (e: Exception) { emptyList() }
 }

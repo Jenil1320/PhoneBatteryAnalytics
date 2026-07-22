@@ -133,7 +133,7 @@ fun HistoryScreen(sessions: List<Session>) {
             Column {
                 SectionLabel("Estimated app drain · today")
                 data?.sinceMs?.takeIf { it > 0 }?.let { since ->
-                    Text("Since ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(since))} · visible screen time, a proxy for drain",
+                    Text("Since ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(since))} · estimated from screen time",
                         color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
                 }
                 Spacer(Modifier.height(10.dp))
@@ -145,9 +145,9 @@ fun HistoryScreen(sessions: List<Session>) {
                             Text("No app usage recorded yet today.", color = Cell.TextMuted, fontSize = 13.sp)
                         } else {
                             val max = apps.maxOf { it.foregroundMs }.coerceAtLeast(1L)
-                            apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, fmtDur(it.foregroundMs)) }
+                            apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, fmtDur(it.foregroundMs), it.estMah) }
                             Spacer(Modifier.height(8.dp))
-                            Text("Screen time is a proxy for battery use, not per-app mAh — Android reserves exact per-app figures for Settings.",
+                            Text("Rough estimate: screen time × your device's screen power. Exact per-app mAh needs a system permission normal apps can't use.",
                                 color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp)
                         }
                     }
@@ -228,16 +228,19 @@ private fun DrainRow(d: DrainItem) {
 }
 
 @Composable
-private fun AppUsageBar(label: String, fraction: Float, time: String) {
+private fun AppUsageBar(label: String, fraction: Float, time: String, estMah: Int?) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(label, color = Cell.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(96.dp))
+        Text(label, color = Cell.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(84.dp))
         Box(Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Track)) {
             Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(12.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Accent))
         }
-        Text(time, color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp, modifier = Modifier.width(48.dp))
+        Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(64.dp)) {
+            Text(estMah?.let { "~$it mAh" } ?: time, color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp)
+            if (estMah != null) Text(time, color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.sp)
+        }
     }
 }
