@@ -223,14 +223,20 @@ object BatteryAnalytics {
         else -> TempBand.HOT
     }
 
-    /** Human label for how fast the battery is charging (only while charging). */
-    fun chargeRate(currentUa: Long?, status: String): String {
+    /**
+     * Human label for how fast the battery is charging (only while charging),
+     * graded by actual power in watts (voltage × current) so it holds across
+     * devices and charge levels rather than by raw current alone.
+     */
+    fun chargeRate(currentUa: Long?, voltageV: Float?, status: String): String {
         if (status != "Charging" || currentUa == null) return "—"
-        val mA = kotlin.math.abs(currentUa / 1000)
+        val watts = powerWatts(voltageV, currentUa) ?: return "—"
         return when {
-            mA >= 2000 -> "Fast"
-            mA >= 1000 -> "Normal"
-            mA > 0 -> "Trickle"
+            watts >= 25.0 -> "Very fast"
+            watts >= 13.0 -> "Fast"
+            watts >= 7.0 -> "Normal"
+            watts >= 2.5 -> "Slow"
+            watts > 0.0 -> "Trickle"
             else -> "—"
         }
     }

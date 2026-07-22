@@ -192,7 +192,7 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
         val level = snapshot?.levelPct ?: 0
         val (top, bottom) = orbColors(level)
         val status = snapshot?.status ?: "—"
-        val chargeRateLbl = BatteryAnalytics.chargeRate(snapshot?.currentUa, status)
+        val chargeRateLbl = BatteryAnalytics.chargeRate(snapshot?.currentUa, snapshot?.voltageV, status)
 
         // Discharge slope + runtime, computed up front so the orb, the endurance card
         // and the charge-today forecast all share the same rate.
@@ -223,17 +223,6 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
             }
         }
 
-        analysis?.let {
-            val firm = it.capacitySource == CapacitySource.GAUGE || it.capacitySource == CapacitySource.SESSION
-            Spacer(Modifier.height(16.dp))
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
-                else ConditionPill("Estimating", Cell.TextMuted)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        ChargeAlarmCard(status)
 
         // "Lasts for" at light / normal / heavy use (mockup 2c), scaled off the recent drain.
         if (status == "Discharging" && dischargeRate != null && dischargeRate > 0.0) {
@@ -481,48 +470,37 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             Spacer(Modifier.height(14.dp))
             SurfaceCard {
                 Column {
-                    SectionLabel("What's wearing it")
-                    Spacer(Modifier.height(12.dp))
+                    SectionLabel("What's aging your battery")
+                    Spacer(Modifier.height(10.dp))
                     val cal = if (analysis.modeledHasCalendar) (analysis.modeledCalendarLossPct ?: 0.0) else 0.0
-                    val total = (cal + cyc).coerceAtLeast(0.001)
-                    val calFrac = (cal / total).toFloat()
-                    Row(Modifier.fillMaxWidth().height(26.dp).clip(RoundedCornerShape(8.dp))) {
-                        if (calFrac > 0.02f) Box(Modifier.weight(calFrac).fillMaxHeight().background(Cell.AccentDeep), contentAlignment = Alignment.Center) {
-                            Text("${cal.roundToInt()}% cal", color = Cell.OnTile, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    val total = cyc + cal
+                    Text("Your battery has lost about ${total.roundToInt()}% of its capacity so far. Here's what caused it:",
+                        color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 20.sp)
+                    Spacer(Modifier.height(14.dp))
+                    HBar("Cycles", (cyc / 100.0).toFloat(), "−${cyc.roundToInt()}%", Cell.Warn)
+                    if (analysis.modeledHasCalendar) {
+                        HBar("Age/heat", (cal / 100.0).toFloat(), "−${cal.roundToInt()}%", Cell.AccentDeep)
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text("Age/heat", color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp, modifier = Modifier.width(58.dp))
+                            Text("needs battery age", color = Cell.TextFaint, fontSize = 11.sp)
                         }
-                        Box(Modifier.weight((1f - calFrac).coerceAtLeast(0.02f)).fillMaxHeight().background(Cell.Warn), contentAlignment = Alignment.Center) {
-                            Text("${cyc.roundToInt()}% cyc", color = Cell.OnTile, fontFamily = Mono, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Age + heat", color = Cell.TextFaint, fontSize = 11.sp)
-                        Text("From charging", color = Cell.TextFaint, fontSize = 11.sp)
                     }
                     Spacer(Modifier.height(10.dp))
-                    KeyValueRow("From charge cycles", String.format(Locale.US, "−%.1f pts", cyc))
-                    if (analysis.modeledHasCalendar) {
-                        KeyValueRow("From age & heat", String.format(Locale.US, "−%.1f pts", analysis.modeledCalendarLossPct ?: 0.0))
-                    } else {
-                        KeyValueRow("From age & heat", "needs battery age")
-                    }
                     Text(
                         if (analysis.modeledHasCalendar)
-                            "Charging wears the battery. Age and heat wear it too. Cellspan shows how much comes from each."
+                            "Charging wears the battery, and so do age and heat. This is a typical estimate for your cycle count."
                         else "This is the wear from charging. Wear from age and heat needs the battery's make date, which Android hides from apps.",
-                        color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp),
+                        color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp,
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(20.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("What this means")
-                Text("State of Health is how much charge the battery still holds versus new. Above 85% is healthy; 80–85% is aging; below 80% or 800 cycles is the usual point to consider a replacement.",
-                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
-            }
-        }
         forecast?.takeIf { it.method != SohForecaster.Method.NONE }?.let { fc ->
             Spacer(Modifier.height(14.dp))
             SurfaceCard {
@@ -603,7 +581,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
 
 // ── Diagnose ─────────────────────────────────────────────────────────────────
 @Composable
-fun DiagnoseScreen(
+fun SettingsScreen(
     snapshot: BatterySnapshot?,
     analysis: Analysis?,
     onOpenInfo: (String) -> Unit = {},
@@ -618,62 +596,28 @@ fun DiagnoseScreen(
         )
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
-        Text("Diagnose", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+        val status = snapshot?.status ?: "—"
+        Text("Settings", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+
+        Spacer(Modifier.height(16.dp))
+        ChargeAlarmCard(status)
 
         Spacer(Modifier.height(16.dp))
         SurfaceCard {
             Column {
-                SectionLabel("Device")
+                SectionLabel("This device")
                 Spacer(Modifier.height(8.dp))
-                KeyValueRow("Manufacturer", snapshot?.manufacturer?.ifBlank { "—" } ?: "—")
-                KeyValueRow("Model", snapshot?.model?.ifBlank { "—" } ?: "—")
-                KeyValueRow("Codename", snapshot?.device?.ifBlank { "—" } ?: "—")
+                KeyValueRow("Model",
+                    listOfNotNull(snapshot?.manufacturer?.ifBlank { null }, snapshot?.model?.ifBlank { null })
+                        .joinToString(" ").ifBlank { "—" })
                 KeyValueRow("Android", "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Battery")
-                Spacer(Modifier.height(8.dp))
                 KeyValueRow("Chemistry", snapshot?.technology ?: "—")
-                KeyValueRow("Design capacity", analysis?.designCapacityMah?.let { "$it mAh" + if (analysis.designIsFromDatabase) " (typical)" else "" } ?: "—")
-                KeyValueRow("Full charge (est.)", analysis?.currentCapacityMah?.let { "$it mAh" } ?: "—")
-                KeyValueRow("Charge remaining", snapshot?.chargeCounterUah?.let { "${it / 1000} mAh" } ?: "—")
-                KeyValueRow("State of Health", analysis?.sohPct?.let {
-                    val n = it.toInt()
-                    when (analysis.capacitySource) {
-                        CapacitySource.SESSION -> "$n% (measured)"
-                        CapacitySource.ESTIMATE -> "~$n% (estimating)"
-                        else -> "$n%"
-                    }
-                } ?: "—",
-                    valueColor = if (analysis?.capacitySource == CapacitySource.ESTIMATE) Cell.TextMuted
-                    else analysis?.let { conditionColor(it.condition) } ?: Cell.TextPrimary)
+                KeyValueRow("Design capacity",
+                    analysis?.designCapacityMah?.let { "$it mAh" + if (analysis.designIsFromDatabase) " (typical)" else "" } ?: "—")
                 KeyValueRow("Cycle count", analysis?.cycleCount?.let { "$it" } ?: "not reported")
-                if (snapshot?.manufacturingEpoch != null) KeyValueRow("Manufactured", Fmt.isoDate(snapshot.manufacturingEpoch * 1000))
                 Spacer(Modifier.height(6.dp))
                 Text("Set design capacity", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier.clickable { showDesignDialog = true }.padding(vertical = 3.dp))
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Live")
-                Spacer(Modifier.height(8.dp))
-                KeyValueRow("Charge level", "${snapshot?.levelPct ?: "—"}%")
-                KeyValueRow("Status", snapshot?.status ?: "—")
-                KeyValueRow("Charging speed", BatteryAnalytics.chargeRate(snapshot?.currentUa, snapshot?.status ?: ""))
-                KeyValueRow("Voltage", snapshot?.voltageV?.let { String.format(Locale.US, "%.2f V", it) } ?: "—")
-                KeyValueRow("Current", snapshot?.currentUa?.let { "${kotlin.math.abs(it / 1000)} mA" } ?: "—")
-                KeyValueRow("Power", BatteryAnalytics.powerWatts(snapshot?.voltageV, snapshot?.currentUa)?.let { String.format(Locale.US, "%.1f W", it) } ?: "—")
-                val band = BatteryAnalytics.tempBand(snapshot?.temperatureC)
-                KeyValueRow("Temperature", (snapshot?.temperatureC?.let { String.format(Locale.US, "%.1f°C", it) } ?: "—") + "  ${band.label}",
-                    valueColor = tempColor(band))
-                KeyValueRow("Health flag", snapshot?.health ?: "—")
             }
         }
 
@@ -685,25 +629,6 @@ fun DiagnoseScreen(
                 Tip("Keep the charge roughly between 20% and 80% for everyday use.")
                 Tip("Avoid leaving it hot while charging — heat is the biggest cause of wear.")
                 Tip("Occasional full charges are fine; constant 100% at high heat is not.")
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("Data source")
-                Spacer(Modifier.height(8.dp))
-                val full = snapshot?.sysfsAvailable == true
-                Text(
-                    if (full) "Reading exact values directly from the fuel gauge. State of Health is measured, not estimated."
-                    else "State of Health is estimated: full charge ≈ remaining charge ÷ level, divided by the model's design capacity. Android doesn't expose the fuel gauge's exact capacity to apps.",
-                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
-                )
-                if (!full) {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Exact capacity, manufacture date and the charge/temperature history unlock automatically with root or an ADB helper (Shizuku).",
-                        color = Cell.TextFaint, fontSize = 12.sp, lineHeight = 18.sp)
-                }
             }
         }
 
@@ -729,10 +654,7 @@ fun DiagnoseScreen(
             Column {
                 SectionLabel("Data & history")
                 Spacer(Modifier.height(8.dp))
-                Text("Cellspan records a health sample about every 6 hours and each time you open the app, plus a daily summary of temperature, voltage, current and cycles. Live vitals refresh about once a minute while the app is open.",
-                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
-                Spacer(Modifier.height(8.dp))
-                Text("It stays in Cellspan's private on-device space and is kept for years (only the 3-day live log is trimmed). Export saves your battery usage data — every reading with its timestamp — to a file you can keep, open later, or move to a new phone. Choose how far back to include, or export everything.",
+                Text("Save your battery data — every reading with its timestamp — to a file you can keep or move to a new phone. Pick a range, or export everything.",
                     color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(12.dp))
                 Text("EXPORT RANGE", color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.4.sp)

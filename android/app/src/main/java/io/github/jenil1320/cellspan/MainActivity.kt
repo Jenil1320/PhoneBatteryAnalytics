@@ -42,12 +42,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.jenil1320.cellspan.ui.BatteryBasicsScreen
-import io.github.jenil1320.cellspan.ui.DiagnoseScreen
 import io.github.jenil1320.cellspan.ui.HealthScreen
 import io.github.jenil1320.cellspan.ui.HistoryScreen
 import io.github.jenil1320.cellspan.ui.MainViewModel
 import io.github.jenil1320.cellspan.ui.NowScreen
 import io.github.jenil1320.cellspan.ui.OnboardingScreen
+import io.github.jenil1320.cellspan.ui.SettingsScreen
 import io.github.jenil1320.cellspan.ui.PrivacyPolicyScreen
 import io.github.jenil1320.cellspan.ui.TrendsScreen
 import io.github.jenil1320.cellspan.data.AppPrefs
@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Tab(val label: String) {
-    NOW("Now"), HEALTH("Health"), TRENDS("Trends"), HISTORY("History"), DIAGNOSE("Diagnose")
+    NOW("Now"), HEALTH("Health"), TRENDS("Trends"), HISTORY("History"), SETTINGS("Settings")
 }
 
 @Composable
@@ -118,7 +118,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast)
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
                 Tab.HISTORY -> HistoryScreen(state.sessions)
-                Tab.DIAGNOSE -> DiagnoseScreen(
+                Tab.SETTINGS -> SettingsScreen(
                     state.snapshot, state.analysis,
                     onOpenInfo = { info = it },
                     onSetDesignCapacity = { mah -> AppPrefs.setDesignOverrideMah(ctx, mah); vm.refresh() },

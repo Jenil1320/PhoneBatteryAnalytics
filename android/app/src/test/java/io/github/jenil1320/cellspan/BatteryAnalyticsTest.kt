@@ -151,11 +151,15 @@ class BatteryAnalyticsTest {
     }
 
     @Test
-    fun chargeRate_onlyWhileCharging() {
-        assertEquals("Fast", BatteryAnalytics.chargeRate(2_500_000, "Charging"))
-        assertEquals("Normal", BatteryAnalytics.chargeRate(1_400_000, "Charging"))
-        assertEquals("Trickle", BatteryAnalytics.chargeRate(500_000, "Charging"))
-        assertEquals("—", BatteryAnalytics.chargeRate(-1_500_000, "Discharging"))
+    fun chargeRate_gradedByWatts() {
+        val v = 4.0f
+        assertEquals("Very fast", BatteryAnalytics.chargeRate(6_500_000, v, "Charging")) // 26 W
+        assertEquals("Fast", BatteryAnalytics.chargeRate(3_500_000, v, "Charging"))       // 14 W
+        assertEquals("Normal", BatteryAnalytics.chargeRate(2_500_000, v, "Charging"))     // 10 W
+        assertEquals("Slow", BatteryAnalytics.chargeRate(1_000_000, v, "Charging"))       // 4 W
+        assertEquals("Trickle", BatteryAnalytics.chargeRate(400_000, v, "Charging"))      // 1.6 W
+        assertEquals("—", BatteryAnalytics.chargeRate(3_000_000, v, "Discharging"))       // not charging
+        assertEquals("—", BatteryAnalytics.chargeRate(3_000_000, null, "Charging"))       // no voltage
     }
 
     @Test
