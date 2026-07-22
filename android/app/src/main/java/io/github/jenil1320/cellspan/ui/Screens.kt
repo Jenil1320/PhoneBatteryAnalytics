@@ -269,16 +269,24 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
             Column {
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     VitalTile("Temperature", snapshot?.temperatureC?.let { String.format(Locale.US, "%.1f°C", it) } ?: "—", band.label,
-                        Modifier.weight(1f).fillMaxHeight(), accent = tempColor(band))
+                        Modifier.weight(1f).fillMaxHeight(), accent = tempColor(band),
+                        metric = Metric.TEMPERATURE,
+                        gauge = snapshot?.temperatureC?.let { (it / 45f).coerceIn(0f, 1f) })
                     VitalTile("Voltage", snapshot?.voltageV?.let { String.format(Locale.US, "%.2f V", it) } ?: "—", vR.note,
-                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(vR.level))
+                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(vR.level),
+                        metric = Metric.VOLTAGE,
+                        gauge = snapshot?.voltageV?.let { ((it - 3.0f) / 1.45f).coerceIn(0f, 1f) })
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     VitalTile("Current", snapshot?.currentUa?.let { "${kotlin.math.abs(it / 1000)} mA" } ?: "—", cR.note,
-                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(cR.level))
+                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(cR.level),
+                        metric = Metric.CURRENT,
+                        gauge = snapshot?.currentUa?.let { (kotlin.math.abs(it / 1000f) / 2500f).coerceIn(0f, 1f) })
                     VitalTile("Power", power?.let { String.format(Locale.US, "%.1f W", it) } ?: "—", pR.note,
-                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(pR.level))
+                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(pR.level),
+                        metric = Metric.POWER,
+                        gauge = power?.let { (kotlin.math.abs(it).toFloat() / 12f).coerceIn(0f, 1f) })
                 }
             }
         }
@@ -380,7 +388,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
             }
             Column(Modifier.width(126.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 KpiTile("Cycles", analysis?.cycleCount?.let { "$it" } ?: "—",
-                    if ((analysis?.cycleCount ?: 0) >= 800) Cell.Bad else Cell.TileSlate, Modifier.fillMaxWidth())
+                    if ((analysis?.cycleCount ?: 0) >= 800) Cell.Warn else Cell.TileSlate, Modifier.fillMaxWidth())
                 KpiTile("Capacity", analysis?.currentCapacityMah?.let { "$it" } ?: "—", Cell.TileTeal, Modifier.fillMaxWidth(),
                     sub = analysis?.designCapacityMah?.let { "of $it mAh" })
             }

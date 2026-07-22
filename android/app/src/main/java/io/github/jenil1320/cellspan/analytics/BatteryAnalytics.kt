@@ -70,9 +70,12 @@ object BatteryAnalytics {
             soh >= REPLACE_SOH -> Condition.FAIR
             else -> Condition.REPLACE
         }
+        // Cycle count is a soft secondary signal only. Rated cycle life varies widely
+        // by manufacturer (Google ~800; several 2024+ flagships 1000+; silicon-anode
+        // packs ~1600–2000), so a high count nudges to "Aging" but never forces
+        // "Consider replacing" on its own — measured State of Health drives that.
         val byCyc = when {
             cycles == null -> null
-            cycles >= REPLACE_CYCLES -> Condition.REPLACE
             cycles >= 600 -> Condition.FAIR
             else -> Condition.GOOD
         }
@@ -103,11 +106,15 @@ object BatteryAnalytics {
         avgTempC: Double? = null,
         avgDoD: Double? = null,
     ): Analysis {
-        // Design capacity: prefer the exact fuel-gauge value, else the table.
+        // Design capacity, best source first: exact fuel-gauge value → the ROM's
+        // PowerProfile (device-reported, works on almost any phone) → our published
+        // table of typical capacities. Only the table is a generic "typical" figure.
         val designFromSysfs = s.chargeFullDesignUah?.let { (it / 1000.0).toInt() }
+        val designFromProfile = s.designCapacityFromProfileMah?.takeIf { it > 0 }
         val designFromTable = DeviceCapacityTable.designCapacityMah(s.model)
-        val designMah = designFromSysfs ?: designFromTable
-        val designIsFromDatabase = designFromSysfs == null && designFromTable != null
+        val designMah = designFromSysfs ?: designFromProfile ?: designFromTable
+        val designIsFromDatabase =
+            designFromSysfs == null && designFromProfile == null && designFromTable != null
 
         // Current full-charge capacity, best source first:
         // exact gauge value → session-measured average → instantaneous estimate.

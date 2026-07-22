@@ -51,7 +51,13 @@ class BatteryAnalyticsTest {
         assertEquals(Condition.GOOD, BatteryAnalytics.conditionFor(90.0, 100))
         assertEquals(Condition.FAIR, BatteryAnalytics.conditionFor(83.0, 796))
         assertEquals(Condition.REPLACE, BatteryAnalytics.conditionFor(79.0, 500))
-        assertEquals(Condition.REPLACE, BatteryAnalytics.conditionFor(90.0, 850))
+        // Cycle count is a soft signal: a high count with healthy SoH is only
+        // "Aging", never "Replace" — rated cycle life varies a lot by manufacturer.
+        assertEquals(Condition.FAIR, BatteryAnalytics.conditionFor(90.0, 850))
+        // Low SoH still drives "Replace" regardless of a low cycle count.
+        assertEquals(Condition.REPLACE, BatteryAnalytics.conditionFor(70.0, 900))
+        // Cycles alone (SoH unknown) never exceed "Aging".
+        assertEquals(Condition.FAIR, BatteryAnalytics.conditionFor(null, 1500))
         assertEquals(Condition.UNKNOWN, BatteryAnalytics.conditionFor(null, null))
     }
 

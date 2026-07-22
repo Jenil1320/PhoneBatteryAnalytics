@@ -22,6 +22,9 @@ data class BatterySnapshot(
     val currentUa: Long?,
     val chargeCounterUah: Long?,
     val cycleCount: Int?,
+    // Design capacity read from the ROM's PowerProfile (works on most devices,
+    // any Android version; null if the hidden API is blocked or absent).
+    val designCapacityFromProfileMah: Int? = null,
     // Enriched fuel-gauge values (usually null on stock Android)
     val chargeFullUah: Long? = null,
     val chargeFullDesignUah: Long? = null,

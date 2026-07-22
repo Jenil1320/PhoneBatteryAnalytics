@@ -1,5 +1,6 @@
 package io.github.jenil1320.cellspan.data
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -37,14 +38,32 @@ object BatteryReader {
         val voltageV = sticky?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
             ?.takeIf { it > 0 }?.let { it / 1000f }
 
+        // Normalise the current's sign from the charge status. OEMs disagree on the
+        // sign of CURRENT_NOW (AOSP: + into the battery; several, e.g. Samsung, invert
+        // it), so we force it: charging → positive, discharging → negative. This keeps
+        // the "positive = charging" convention true on every manufacturer. Magnitude is
+        // untouched, and abs()-based consumers are unaffected.
         val currentUa = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
             .takeIf { it != Long.MIN_VALUE && it != 0L }
+            ?.let { raw ->
+                val mag = kotlin.math.abs(raw)
+                when (statusStr) {
+                    "Charging" -> mag
+                    "Discharging" -> -mag
+                    else -> raw   // Full / Not charging / Unknown: near zero, keep as-is
+                }
+            }
         val chargeCounter = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
             .takeIf { it != Long.MIN_VALUE && it > 0 }
 
         val cycleCount = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             sticky?.getIntExtra(BatteryManager.EXTRA_CYCLE_COUNT, -1)?.takeIf { it > 0 }
         } else null
+
+        // Design capacity from the ROM's PowerProfile — the AccuBattery trick.
+        // Works on nearly all devices regardless of manufacturer, so State of
+        // Health is available even for phones not in DeviceCapacityTable.
+        val designFromProfile = readPowerProfileCapacityMah(context)
 
         // Best-effort fuel-gauge enrichment (usually blocked by SELinux on stock).
         val chargeFull = readLongNode("charge_full")
@@ -65,11 +84,35 @@ object BatteryReader {
             currentUa = currentUa,
             chargeCounterUah = chargeCounter,
             cycleCount = cycleCount,
+            designCapacityFromProfileMah = designFromProfile,
             chargeFullUah = chargeFull,
             chargeFullDesignUah = chargeFullDesign,
             manufacturingEpoch = mfg,
             sysfsAvailable = chargeFull != null && chargeFullDesign != null,
         )
+    }
+
+    /**
+     * Design capacity (mAh) from the framework's PowerProfile — the value every
+     * ROM ships in `frameworks/base` as `battery.capacity`. Reached by reflection
+     * because the class is `com.android.internal`, but it is widely readable and,
+     * unlike the fuel-gauge nodes, needs no SELinux exception. Best-effort: any
+     * failure (blocked hidden API, missing method) simply returns null and the
+     * caller falls back to the published-capacity table.
+     */
+    @SuppressLint("PrivateApi")
+    private fun readPowerProfileCapacityMah(context: Context): Int? = try {
+        val cls = Class.forName("com.android.internal.os.PowerProfile")
+        val instance = cls.getConstructor(Context::class.java).newInstance(context)
+        val mAh = try {
+            cls.getMethod("getBatteryCapacity").invoke(instance) as? Double
+        } catch (e: Throwable) {
+            cls.getMethod("getAveragePower", String::class.java)
+                .invoke(instance, "battery.capacity") as? Double
+        }
+        mAh?.takeIf { it > 1000.0 && it < 20000.0 }?.toInt()
+    } catch (e: Throwable) {
+        null
     }
 
     private fun readLongNode(name: String): Long? = try {

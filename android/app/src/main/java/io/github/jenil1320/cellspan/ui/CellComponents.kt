@@ -80,9 +80,23 @@ fun ConditionPill(label: String, color: Color) {
     }
 }
 
-/** A bordered vitals tile: label on top, big value, optional sub-line. */
+/**
+ * A bordered vitals tile: a metric glyph + label on top, big value, optional
+ * sub-line, and an optional slim range gauge whose fill shows where the reading
+ * sits within its normal span. Falls back to a small accent dot when no [metric]
+ * is given, so older call sites are unchanged.
+ */
 @Composable
-fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier = Modifier, accent: Color = Cell.TextPrimary, bg: Color = Cell.Surface) {
+fun VitalTile(
+    label: String,
+    value: String,
+    sub: String = "",
+    modifier: Modifier = Modifier,
+    accent: Color = Cell.TextPrimary,
+    bg: Color = Cell.Surface,
+    metric: Metric? = null,
+    gauge: Float? = null,
+) {
     Box(
         modifier
             .shadow(3.dp, RoundedCornerShape(16.dp), spotColor = Color(0x16354F52), ambientColor = Color(0x0E354F52))
@@ -92,8 +106,9 @@ fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier
             .padding(14.dp)
     ) {
         Column {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.size(6.dp).clip(CircleShape).background(accent))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                if (metric != null) MetricGlyph(metric, accent, glyphSize = 15.dp)
+                else Box(Modifier.size(6.dp).clip(CircleShape).background(accent))
                 SectionLabel(label)
             }
             Text(value, color = accent, fontFamily = Mono, fontSize = 20.sp,
@@ -101,6 +116,9 @@ fun VitalTile(label: String, value: String, sub: String = "", modifier: Modifier
             if (sub.isNotEmpty()) {
                 Text(sub, color = Cell.TextSecondary, fontFamily = Mono, fontSize = 11.sp,
                     fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
+            }
+            if (gauge != null) {
+                MetricGauge(gauge, accent, Modifier.padding(top = 10.dp))
             }
         }
     }
