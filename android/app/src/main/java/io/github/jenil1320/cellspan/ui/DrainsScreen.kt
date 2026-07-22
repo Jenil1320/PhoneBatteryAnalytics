@@ -31,10 +31,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import io.github.jenil1320.cellspan.data.AppUsage
 import io.github.jenil1320.cellspan.data.DrainCost
 import io.github.jenil1320.cellspan.data.DrainItem
@@ -70,19 +73,25 @@ private fun fmtDur(ms: Long): String {
 @Composable
 fun DrainsScreen() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var data by remember { mutableStateOf<DrainsData?>(null) }
+    // Poll only while the tab is actually on screen — repeatOnLifecycle pauses the loop
+    // when the app is backgrounded, so it never wakes UsageStats/Settings in the
+    // background (which would waste battery, on Android versions before 14's freezing).
     LaunchedEffect(Unit) {
-        while (true) {
-            data = withContext(Dispatchers.IO) {
-                val now = System.currentTimeMillis()
-                val since = startOfToday()
-                val access = AppUsage.hasAccess(context)
-                DrainsData(
-                    SystemDrains.read(context), access,
-                    if (access) AppUsage.top(context, since, now) else emptyList(), since,
-                )
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                data = withContext(Dispatchers.IO) {
+                    val now = System.currentTimeMillis()
+                    val since = startOfToday()
+                    val access = AppUsage.hasAccess(context)
+                    DrainsData(
+                        SystemDrains.read(context), access,
+                        if (access) AppUsage.top(context, since, now) else emptyList(), since,
+                    )
+                }
+                delay(10_000)
             }
-            delay(10_000)
         }
     }
 
