@@ -36,6 +36,7 @@ fun TimeSeriesChart(
     yFormat: (Float) -> String = { it.toInt().toString() },
     xStart: String = "",
     xEnd: String = "now",
+    xMid: String = "",
     threshold: Float? = null,
     thresholdLabel: String? = null,
     forecast: List<Pair<Float, Float>>? = null,
@@ -44,12 +45,9 @@ fun TimeSeriesChart(
     lineColor: Color = Cell.Accent,
 ) {
     val tm = rememberTextMeasurer()
-    val lbl = TextStyle(color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.sp)
+    val lbl = TextStyle(color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp)
     Canvas(modifier.fillMaxWidth().height(height)) {
         if (points.isEmpty()) return@Canvas
-        val ml = 46f; val mr = 12f; val mt = 12f; val mb = 22f
-        val pw = size.width - ml - mr
-        val ph = size.height - mt - mb
 
         val fc = forecast?.takeIf { it.size >= 2 }
         val ys = points.map { it.second }.toMutableList().also { l ->
@@ -59,6 +57,16 @@ fun TimeSeriesChart(
         var ymin = ys.min(); var ymax = ys.max()
         if (ymin == ymax) { ymin -= 1f; ymax += 1f }
         val padY = (ymax - ymin) * 0.12f; ymin -= padY; ymax += padY
+
+        // Size the left margin to the widest y-label (units included), with a clear
+        // gap between the numbers and the gridlines so nothing crowds the plot.
+        val yTicks = listOf(ymax - padY, (ymin + ymax) / 2f, ymin + padY)
+        val yGap = 12f
+        val ml = yTicks.maxOf { tm.measure(yFormat(it), lbl).size.width }.toFloat() + yGap + 4f
+        val mr = 14f; val mt = 14f; val mb = 24f
+        val pw = size.width - ml - mr
+        val ph = size.height - mt - mb
+
         val xs = points.map { it.first }
         val allX = xs + (fc?.map { it.first } ?: emptyList())
         var xmin = allX.min(); var xmax = allX.max()
@@ -67,11 +75,11 @@ fun TimeSeriesChart(
         fun py(y: Float) = mt + (ymax - y) / (ymax - ymin) * ph
 
         // Horizontal gridlines + y labels (top / mid / bottom of the real range).
-        listOf(ymax - padY, (ymin + ymax) / 2f, ymin + padY).forEach { tk ->
+        yTicks.forEach { tk ->
             val y = py(tk)
             drawLine(Cell.Border, Offset(ml, y), Offset(ml + pw, y), 1f)
             val lay = tm.measure(yFormat(tk), lbl)
-            drawText(lay, topLeft = Offset(ml - 6 - lay.size.width, y - lay.size.height / 2f))
+            drawText(lay, topLeft = Offset(ml - yGap - lay.size.width, y - lay.size.height / 2f))
         }
 
         // Threshold guide.
@@ -123,13 +131,17 @@ fun TimeSeriesChart(
         drawCircle(lineColor.copy(alpha = 0.2f), 12f, Offset(lx, ly))
         drawCircle(lineColor, 5.5f, Offset(lx, ly))
 
-        // X labels.
+        // X labels: start (left), optional mid (centre), end (right).
+        val xBase = size.height - tm.measure("0", lbl).size.height.toFloat()
         if (xStart.isNotEmpty()) {
-            val lay = tm.measure(xStart, lbl)
-            drawText(lay, topLeft = Offset(ml, size.height - lay.size.height))
+            drawText(tm.measure(xStart, lbl), topLeft = Offset(ml, xBase))
+        }
+        if (xMid.isNotEmpty()) {
+            val mid = tm.measure(xMid, lbl)
+            drawText(mid, topLeft = Offset(ml + pw / 2f - mid.size.width / 2f, xBase))
         }
         val end = tm.measure(xEnd, lbl)
-        drawText(end, topLeft = Offset(ml + pw - end.size.width, size.height - end.size.height))
+        drawText(end, topLeft = Offset(ml + pw - end.size.width, xBase))
     }
 }
 

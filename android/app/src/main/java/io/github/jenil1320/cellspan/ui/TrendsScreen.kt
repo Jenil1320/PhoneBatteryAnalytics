@@ -15,12 +15,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import java.util.Date
+import java.util.TimeZone
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,40 +80,73 @@ private fun vitalPoints(days: List<DailyVital>, sel: (DailyVital) -> Float?): Li
 @Composable
 fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsage: List<Pair<String, Double>>) {
     var range by rememberSaveable { mutableStateOf(TrendRange.DAY) }
+    var custom by remember { mutableStateOf<Pair<String, String>?>(null) }  // ISO day keys
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+    // "Live" = the intra-day view from the 24h log; otherwise we aggregate daily rows.
+    val live = range == TrendRange.DAY && custom == null
+
+    if (showPicker) {
+        DateRangePickerSheet(
+            onDismiss = { showPicker = false },
+            onApply = { s, e -> custom = s to e; showPicker = false },
+        )
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Text("Trends", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            "Temperature, voltage, current and charge cycles over time. Day is live; Week and Month aggregate one point per day.",
+            "Temperature, voltage, current and charge cycles over time. Day is live; Week, Month and a custom range show one point per day.",
             color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp),
         )
 
         Spacer(Modifier.height(16.dp))
-        RangeToggle(range) { range = it }
+        // Selecting a preset clears any custom range; while custom is active no preset is highlighted.
+        RangeToggle(range, active = custom == null) { range = it; custom = null }
+
+        // Custom date range, within the ~31 days of daily history Cellspan keeps.
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(custom?.let { "Custom: ${dayLabel(it.first)} – ${dayLabel(it.second)}" } ?: "Pick a custom range",
+                color = if (custom != null) Cell.Accent else Cell.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable { showPicker = true }.padding(vertical = 2.dp))
+            if (custom != null) Text("Clear", color = Cell.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.clickable { custom = null }.padding(vertical = 2.dp))
+        }
 
         val nowTs = socLog.lastOrNull()?.timestampMs ?: System.currentTimeMillis()
         val since24 = nowTs - 24 * 3_600_000L
-        // Week/Month = the last N CALENDAR days (not the last N recorded rows), so a
-        // stretch with missing days doesn't quietly widen the range beyond its label.
-        val window = if (range == TrendRange.DAY) emptyList() else {
-            val lastEpoch = dailyVitals.lastOrNull()?.day?.let { dayEpoch(it) } ?: 0L
-            val cutoff = lastEpoch - (range.days - 1).toLong() * 86_400_000L
-            dailyVitals.filter { dayEpoch(it.day) >= cutoff }
+        // Aggregated window: a custom range, else the last N CALENDAR days (not the last
+        // N recorded rows), so missing days don't quietly widen the range beyond its label.
+        val window = when {
+            custom != null -> dailyVitals.filter { it.day >= custom!!.first && it.day <= custom!!.second }
+            range == TrendRange.DAY -> emptyList()
+            else -> {
+                val lastEpoch = dailyVitals.lastOrNull()?.day?.let { dayEpoch(it) } ?: 0L
+                val cutoff = lastEpoch - (range.days - 1).toLong() * 86_400_000L
+                dailyVitals.filter { dayEpoch(it.day) >= cutoff }
+            }
         }
         val xStartDays = window.firstOrNull()?.day?.let { dayLabel(it) } ?: ""
+        val xEndDays = if (custom != null) (window.lastOrNull()?.day?.let { dayLabel(it) } ?: "") else "today"
+        // Mid x-axis label (shared): the middle of the visible window.
+        val dayTsList = socLog.filter { it.timestampMs >= since24 }.map { it.timestampMs }
+        val dayMid = if (dayTsList.size >= 2) Fmt.time((dayTsList.min() + dayTsList.max()) / 2) else ""
+        val aggMid = window.getOrNull(window.size / 2)?.day?.let { dayLabel(it) } ?: ""
 
         // ── Temperature ─────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
-        if (range == TrendRange.DAY) {
+        if (live) {
             val tp = dayPoints(socLog, nowTs, { it.temperatureC })
-            TrendCard("Temperature · live", tp, { String.format(Locale.US, "%.1f°", it) }, Cell.Cool,
+            TrendCard("Temperature · live", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
                 Fmt.time(socLog.firstOrNull { it.timestampMs >= since24 && it.temperatureC != null }?.timestampMs), "now",
+                xMid = dayMid,
                 emptyMsg = "Battery temperature over the last 24 hours appears here as readings accumulate.") {
                 MinNowMaxRow(tp.map { it.second }) { String.format(Locale.US, "%.1f°C", it) }
             }
         } else {
             val tp = vitalPoints(window, { it.tempAvg })
-            TrendCard("Temperature · daily avg", tp, { String.format(Locale.US, "%.1f°", it) }, Cell.Cool,
-                xStartDays, "today",
+            TrendCard("Temperature · daily avg", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
+                xStartDays, xEndDays, xMid = aggMid,
                 emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.") {
                 val mins = window.mapNotNull { it.tempMin }
                 val maxs = window.mapNotNull { it.tempMax }
@@ -121,57 +162,58 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
 
         // ── Voltage ─────────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
-        if (range == TrendRange.DAY) {
+        if (live) {
             val vp = dayPoints(socLog, nowTs, { it.voltageV })
-            TrendCard("Voltage · live", vp, { String.format(Locale.US, "%.2fV", it) }, Cell.Accent,
+            TrendCard("Voltage · live", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
                 Fmt.time(socLog.firstOrNull { it.timestampMs >= since24 && it.voltageV != null }?.timestampMs), "now",
+                xMid = dayMid,
                 emptyMsg = "Terminal voltage over the last 24 hours — updates while the app is open.") {
                 MinNowMaxRow(vp.map { it.second }) { String.format(Locale.US, "%.2f V", it) }
             }
         } else {
             val vp = vitalPoints(window, { it.voltAvg })
-            TrendCard("Voltage · daily avg", vp, { String.format(Locale.US, "%.2fV", it) }, Cell.Accent,
-                xStartDays, "today",
+            TrendCard("Voltage · daily avg", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
+                xStartDays, xEndDays, xMid = aggMid,
                 emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.")
         }
 
         // ── Current ─────────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
-        if (range == TrendRange.DAY) {
+        if (live) {
             val cp = dayPoints(socLog, nowTs, { it.currentMa?.toFloat() })
-            TrendCard("Current · live", cp, { "${it.toInt()}" }, Cell.AccentBright,
+            TrendCard("Current · live", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
                 Fmt.time(socLog.firstOrNull { it.timestampMs >= since24 && it.currentMa != null }?.timestampMs), "now",
-                threshold = 0f, thresholdLabel = "0 mA",
+                xMid = dayMid, threshold = 0f, thresholdLabel = "0 mA",
                 emptyMsg = "Charge/discharge current over the last 24 hours — updates while the app is open.") {
                 MinNowMaxRow(cp.map { it.second }) { "${it.toInt()} mA" }
                 Spacer(Modifier.height(4.dp))
-                Text("Positive = charging, negative = draw.", color = Cell.TextFaint, fontSize = 11.sp)
+                Text("Positive = charging, negative = discharging.", color = Cell.TextFaint, fontSize = 11.sp)
             }
         } else {
             val cp = vitalPoints(window, { it.currAvg?.toFloat() })
-            TrendCard("Current · daily avg", cp, { "${it.toInt()}" }, Cell.AccentBright,
-                xStartDays, "today", threshold = 0f, thresholdLabel = "0 mA",
+            TrendCard("Current · daily avg", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
+                xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA",
                 emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.") {
-                Text("Positive = net charging that day, negative = net draw.", color = Cell.TextFaint, fontSize = 11.sp,
+                Text("Positive = net charging that day, negative = net discharge.", color = Cell.TextFaint, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 6.dp))
             }
         }
 
         // ── Charge cycles ───────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
-        if (range == TrendRange.DAY) {
+        if (live) {
             SurfaceCard {
                 Column {
                     SectionLabel("Charge cycles")
                     Spacer(Modifier.height(10.dp))
-                    Text("Cycle count changes too slowly to chart within a day. Switch to Week or Month to see it climb.",
+                    Text("Cycle count changes too slowly to chart within a day. Switch to Week, Month or a custom range to see it climb.",
                         color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
                 }
             }
         } else {
             val cyc = vitalPoints(window, { it.cycles?.toFloat() })
-            TrendCard("Charge cycles · daily", cyc, { it.toInt().toString() }, Cell.AccentDeep,
-                xStartDays, "today",
+            TrendCard("Charge cycles · daily", cyc, { "${it.toInt()} cyc" }, Cell.AccentDeep,
+                xStartDays, xEndDays, xMid = aggMid,
                 threshold = BatteryAnalytics.REPLACE_CYCLES.toFloat(), thresholdLabel = "800",
                 emptyMsg = "Cycle history builds one point per day. If your phone reports cycle count, it appears here.")
         }
@@ -223,24 +265,49 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
 }
 
 @Composable
-private fun RangeToggle(current: TrendRange, onSelect: (TrendRange) -> Unit) {
+private fun RangeToggle(current: TrendRange, active: Boolean = true, onSelect: (TrendRange) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Cell.BgElevated)
             .border(1.dp, Cell.Border, RoundedCornerShape(12.dp)).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         TrendRange.entries.forEach { r ->
-            val active = r == current
+            val isActive = active && r == current
             Box(
                 Modifier.weight(1f).clip(RoundedCornerShape(9.dp))
-                    .background(if (active) Cell.AccentSoft else Color.Transparent)
+                    .background(if (isActive) Cell.AccentSoft else Color.Transparent)
                     .clickable { onSelect(r) }.padding(vertical = 9.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(r.label, color = if (active) Cell.Accent else Cell.TextMuted,
-                    fontSize = 13.sp, fontWeight = if (active) FontWeight.Medium else FontWeight.Normal)
+                Text(r.label, color = if (isActive) Cell.Accent else Cell.TextMuted,
+                    fontSize = 13.sp, fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal)
             }
         }
+    }
+}
+
+/** Material date-range picker; returns the chosen start/end as ISO "yyyy-MM-dd" day keys. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateRangePickerSheet(onDismiss: () -> Unit, onApply: (String, String) -> Unit) {
+    val state = rememberDateRangePickerState()
+    // The picker returns UTC-midnight millis; format in UTC so the day key matches.
+    val utc = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") } }
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = state.selectedStartDateMillis != null && state.selectedEndDateMillis != null,
+                onClick = {
+                    val s = state.selectedStartDateMillis
+                    val e = state.selectedEndDateMillis
+                    if (s != null && e != null) onApply(utc.format(Date(s)), utc.format(Date(e)))
+                },
+            ) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) {
+        DateRangePicker(state = state, modifier = Modifier.height(500.dp))
     }
 }
 
@@ -252,6 +319,7 @@ private fun TrendCard(
     lineColor: Color,
     xStart: String,
     xEnd: String,
+    xMid: String = "",
     threshold: Float? = null,
     thresholdLabel: String? = null,
     emptyMsg: String,
@@ -263,7 +331,7 @@ private fun TrendCard(
             Spacer(Modifier.height(12.dp))
             if (points.size >= 2) {
                 TimeSeriesChart(points, yFormat = yFormat, lineColor = lineColor, xStart = xStart, xEnd = xEnd,
-                    threshold = threshold, thresholdLabel = thresholdLabel)
+                    xMid = xMid, threshold = threshold, thresholdLabel = thresholdLabel)
                 extra?.invoke()
             } else {
                 Text(emptyMsg, color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
