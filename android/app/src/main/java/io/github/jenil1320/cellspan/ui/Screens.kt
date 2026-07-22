@@ -394,9 +394,16 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
         val pts = chartPoints(history) { it.sohPct }
         if (pts.isNotEmpty()) {
             Spacer(Modifier.height(18.dp)); SectionLabel("Capacity trend"); Spacer(Modifier.height(10.dp))
+            // Scatter + least-squares regression line — reads clean despite per-sample noise.
+            val reg = if (pts.size >= 2) {
+                val fit = SohForecaster.wls(pts.map { it.first.toDouble() }, pts.map { it.second.toDouble() }, DoubleArray(pts.size) { 1.0 })
+                val x0 = pts.minOf { it.first }; val x1 = pts.maxOf { it.first }
+                listOf(x0 to (fit.a + fit.b * x0).toFloat(), x1 to (fit.a + fit.b * x1).toFloat())
+            } else null
             TimeSeriesChart(pts, yFormat = { "${it.toInt()}%" },
                 xStart = Fmt.isoDate(history.firstOrNull { it.sohPct != null }?.timestampMs), xEnd = "now",
-                threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%")
+                threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%",
+                scatter = true, regressionLine = reg)
         }
 
         // Measured vs modeled: is this cell aging normally for its cycle count?
@@ -670,7 +677,7 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                     stream.use { os -> os.write(json.toByteArray()) }
                 }.isSuccess
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(ctx, if (ok) "History exported" else "Export failed — try another location", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, if (ok) "Battery data exported" else "Export failed — try another location", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -682,16 +689,16 @@ fun DiagnoseScreen(snapshot: BatterySnapshot?, analysis: Analysis?) {
                 Text("Cellspan records a health sample about every 6 hours and each time you open the app, plus a daily summary of temperature, voltage, current and cycles. Live vitals refresh about once a minute while the app is open.",
                     color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
                 Spacer(Modifier.height(8.dp))
-                Text("It lives in Cellspan's private on-device database (cellspan.db). Health samples, daily summaries, charge sessions and daily usage are kept indefinitely — years of history fit easily; only the 3-day high-resolution live log is trimmed. To analyse it later, even a full 2 years on, tap Export to pull the whole dataset as one JSON file (it also lets your history survive an uninstall or a new phone).",
+                Text("It stays in Cellspan's private on-device space and is kept for years (only the 3-day live log is trimmed). Tap Export to save all your battery usage data — every reading with its timestamp — to a file you can keep, open later, or move to a new phone.",
                     color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(14.dp))
                 Box(
                     Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
                         .border(1.dp, Cell.BorderAccent, RoundedCornerShape(10.dp))
-                        .clickable { exporter.launch("cellspan-history.json") }
+                        .clickable { exporter.launch("cellspan-battery-data.json") }
                         .padding(horizontal = 16.dp, vertical = 11.dp),
                 ) {
-                    Text("Export history (JSON)", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                    Text("Export battery data", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
                 }
             }
         }

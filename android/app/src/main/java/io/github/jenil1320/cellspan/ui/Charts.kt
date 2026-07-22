@@ -39,6 +39,8 @@ fun TimeSeriesChart(
     threshold: Float? = null,
     thresholdLabel: String? = null,
     forecast: List<Pair<Float, Float>>? = null,
+    scatter: Boolean = false,
+    regressionLine: List<Pair<Float, Float>>? = null,
     lineColor: Color = Cell.Accent,
 ) {
     val tm = rememberTextMeasurer()
@@ -85,8 +87,16 @@ fun TimeSeriesChart(
             }
         }
 
-        // Area fill + line.
-        if (points.size >= 2) {
+        // Series: a scatter of points with a straight regression line, or a connected
+        // area/line. Scatter reads cleaner for noisy per-sample data (e.g. capacity).
+        if (scatter) {
+            regressionLine?.takeIf { it.size >= 2 }?.let { rl ->
+                val rp = Path()
+                rl.forEachIndexed { i, (x, y) -> if (i == 0) rp.moveTo(px(x), py(y)) else rp.lineTo(px(x), py(y)) }
+                drawPath(rp, lineColor, style = Stroke(3.5f, cap = StrokeCap.Round))
+            }
+            points.forEach { (x, y) -> drawCircle(lineColor.copy(alpha = 0.65f), 3.4f, Offset(px(x), py(y))) }
+        } else if (points.size >= 2) {
             val line = Path(); val area = Path()
             points.forEachIndexed { i, (x, y) ->
                 val cx = px(x); val cy = py(y)
