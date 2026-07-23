@@ -27,6 +27,8 @@ data class Analysis(
     val cycleCount: Int?,
     val condition: Condition,
     val ageDays: Double?,
+    /** True when [ageDays] came from the date the user supplied, not the fuel gauge. */
+    val ageIsUserSet: Boolean = false,
     val avgCyclesPerMonth: Double?,
     val avgFadePerYear: Double?,
     val etaSohMs: Long?,
@@ -106,6 +108,7 @@ object BatteryAnalytics {
         avgTempC: Double? = null,
         avgDoD: Double? = null,
         designOverrideMah: Int? = null,
+        batteryStartMs: Long? = null,
     ): Analysis {
         // Design capacity, best source first: a user-set override → the exact
         // fuel-gauge value → the ROM's PowerProfile (device-reported, works on almost
@@ -144,14 +147,19 @@ object BatteryAnalytics {
 
         val condition = conditionFor(soh, s.cycleCount)
 
-        // Lifetime stats need the manufacture date (fuel-gauge only).
+        // Lifetime stats need a start date. The fuel gauge's manufacture date is the
+        // best source but stock Android hides it, so fall back to the date the user
+        // gave us — without one the wear model must drop its age/heat term entirely
+        // and cycling wrongly absorbs the whole loss.
         var ageDays: Double? = null
         var cyclesPerMonth: Double? = null
         var fadePerYear: Double? = null
         var etaSohMs: Long? = null
         var etaCyclesMs: Long? = null
 
-        val mfg = s.manufacturingEpoch
+        val mfgFromGauge = s.manufacturingEpoch?.takeIf { it > 0 }
+        val ageFromUser = mfgFromGauge == null && batteryStartMs != null && batteryStartMs < nowMs
+        val mfg = mfgFromGauge ?: batteryStartMs?.takeIf { it < nowMs }?.let { it / 1000 }
         if (mfg != null && mfg > 0) {
             val days = (nowMs - mfg * 1000.0) / MS_PER_DAY
             if (days > 0) {
@@ -195,6 +203,7 @@ object BatteryAnalytics {
             cycleCount = s.cycleCount,
             condition = condition,
             ageDays = ageDays,
+            ageIsUserSet = ageFromUser,
             avgCyclesPerMonth = cyclesPerMonth,
             avgFadePerYear = fadePerYear,
             etaSohMs = etaSohMs,

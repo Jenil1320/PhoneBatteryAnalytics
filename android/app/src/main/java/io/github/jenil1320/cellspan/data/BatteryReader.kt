@@ -66,8 +66,11 @@ object BatteryReader {
         val designFromProfile = readPowerProfileCapacityMah(context)
 
         // Best-effort fuel-gauge enrichment (usually blocked by SELinux on stock).
-        val chargeFull = readLongNode("charge_full")
-        val chargeFullDesign = readLongNode("charge_full_design")
+        // Some drivers expose these nodes but return 0/-1, or report mAh instead of
+        // the expected µAh. Anything outside a plausible µAh range is treated as
+        // absent, so the PowerProfile fallback runs instead of reporting 0% health.
+        val chargeFull = readLongNode("charge_full")?.takeIf { it in 1_000_000L..20_000_000L }
+        val chargeFullDesign = readLongNode("charge_full_design")?.takeIf { it in 1_000_000L..20_000_000L }
         val mfg = readLongNode("manufacturing_date")?.takeIf { it > 0 }
 
         return BatterySnapshot(

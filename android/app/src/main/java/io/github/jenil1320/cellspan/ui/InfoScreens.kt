@@ -12,8 +12,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,7 +42,11 @@ private fun InfoHeader(title: String, onBack: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
-            Modifier.clip(CircleShape).clickable(onClick = onBack).padding(8.dp),
+            // clickable adds no minimum size, so hold the 48dp accessible touch target ourselves.
+            Modifier.clip(CircleShape)
+                .clickable(onClickLabel = "Back", role = Role.Button, onClick = onBack)
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                .padding(8.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text("←", color = Cell.Accent, fontFamily = Sans, fontSize = 22.sp, fontWeight = FontWeight.Medium)
@@ -84,7 +90,7 @@ private fun Para(title: String, body: String) {
  */
 @Composable
 fun BatteryBasicsScreen(onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp)) {
         InfoHeader("Battery basics", onBack)
         Text("What the numbers in Cellspan mean, in simple words.",
             color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
@@ -142,7 +148,7 @@ fun BatteryBasicsScreen(onBack: () -> Unit) {
  */
 @Composable
 fun PrivacyPolicyScreen(onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp)) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp)) {
         InfoHeader("Privacy policy", onBack)
         Text("Cellspan reads your battery data and shows it to you. This page explains what happens to that data.",
             color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
@@ -163,7 +169,11 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
 
         Para("What the app reads",
             "Charge level, status, temperature, voltage, current, and (on Android 14 and later) the cycle count. " +
-                "It also reads your phone model to find the battery's rated capacity. All of this stays on the device.")
+                "It also reads your phone model to find the battery's rated capacity. " +
+                "For the drain hints it reads whether Wi-Fi, Bluetooth, location services, battery saver and airplane mode are on or off, " +
+                "and the screen brightness level. These are on/off states only. " +
+                "Cellspan never reads your position, and it holds no coordinates or other location data. " +
+                "All of this stays on the device.")
 
         Para("App screen time (optional)",
             "If you allow \"Usage access\", Cellspan estimates which apps used the screen most. This is only shown on screen. " +
@@ -179,6 +189,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
 
         Para("Permissions",
             "Wi-Fi state: to show whether Wi-Fi is on, as a drain hint. " +
+                "Notifications: optional, only for the charge alarm. On Android 13 and later the app asks for it when you set the alarm. " +
                 "Usage access: optional, only for the app screen-time estimate. " +
                 "Cellspan asks for no location, contacts, camera, microphone, storage, or internet.")
 

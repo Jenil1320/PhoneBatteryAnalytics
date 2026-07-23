@@ -69,7 +69,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     analysis = BatteryAnalytics.analyze(
                         snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
                         avgTemp(vitals),
-                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()))
+                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()),
+                        batteryStartMs = AppPrefs.batteryStartMs(getApplication()))
                     val last = store.lastSampleMs()
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
                         store.insert(snapshot, analysis)
@@ -110,7 +111,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     analysis = BatteryAnalytics.analyze(
                         snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
                         avgTemp(vitals),
-                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()))
+                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()),
+                        batteryStartMs = AppPrefs.batteryStartMs(getApplication()))
                     accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
@@ -126,14 +128,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Accrue any level drop since the last accrual, using one shared baseline. */
+    /** Accrue any level drop since the last accrual, using one shared baseline.
+     *  Serves both refresh() and tick(); the cursor is advanced under a lock so
+     *  the background worker cannot count the same drop as well. */
     private fun accrueDischarge(store: HistoryStore, snapshot: BatterySnapshot) {
-        val app = getApplication<Application>()
-        val prev = AccrualCursor.get(app)
-        if (prev != null && snapshot.levelPct < prev) {
-            store.addDischarge(dayKey(snapshot.timestampMs), (prev - snapshot.levelPct).toDouble())
-        }
-        AccrualCursor.set(app, snapshot.levelPct)
+        val drop = AccrualCursor.accrue(getApplication<Application>(), snapshot.levelPct)
+        if (drop > 0) store.addDischarge(dayKey(snapshot.timestampMs), drop)
     }
 
     private fun dayKey(ms: Long): String =

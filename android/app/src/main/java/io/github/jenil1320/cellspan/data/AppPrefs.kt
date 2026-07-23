@@ -12,6 +12,8 @@ object AppPrefs {
     private const val ONBOARDED = "onboarded"
     private const val DESIGN_OVERRIDE = "design_override_mah"   // 0 / absent = none
     private const val ALARM_TARGET = "charge_alarm_target"      // 0 = off
+    private const val BG_SAMPLING = "background_sampling"       // hourly sample, user-controlled
+    private const val BATTERY_START = "battery_start_ms"        // 0 / absent = unknown
 
     private fun p(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -30,4 +32,21 @@ object AppPrefs {
     fun chargeAlarmTarget(c: Context): Int = p(c).getInt(ALARM_TARGET, 0)
     fun setChargeAlarmTarget(c: Context, pct: Int) =
         p(c).edit().putInt(ALARM_TARGET, if (pct <= 0) 0 else pct.coerceIn(1, 100)).apply()
+
+    /** Whether the hourly background sample may run. On by default; the user can stop it. */
+    fun backgroundSampling(c: Context): Boolean = p(c).getBoolean(BG_SAMPLING, true)
+    fun setBackgroundSampling(c: Context, on: Boolean) =
+        p(c).edit().putBoolean(BG_SAMPLING, on).apply()
+
+    /**
+     * When the battery started life (bought or made), as epoch millis, or null.
+     * Stock Android hides the manufacture date, so without this the wear model has to
+     * drop its age-and-heat term and cycling wrongly absorbs the whole loss.
+     */
+    fun batteryStartMs(c: Context): Long? = p(c).getLong(BATTERY_START, 0L).takeIf { it > 0L }
+    fun setBatteryStartMs(c: Context, ms: Long?) {
+        p(c).edit().apply {
+            if (ms == null || ms <= 0L) remove(BATTERY_START) else putLong(BATTERY_START, ms)
+        }.apply()
+    }
 }

@@ -18,15 +18,16 @@ class SampleWorker(context: Context, params: WorkerParameters) :
 
     override fun doWork(): Result = try {
         val snapshot = BatteryReader.read(applicationContext)
-        val analysis = BatteryAnalytics.analyze(snapshot, System.currentTimeMillis())
+        val analysis = BatteryAnalytics.analyze(
+            snapshot, System.currentTimeMillis(),
+            batteryStartMs = AppPrefs.batteryStartMs(applicationContext),
+        )
         HistoryStore(applicationContext).use { store ->
             val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(snapshot.timestampMs))
-            // Shared accrual baseline (same one tick()/refresh() use) → counted once.
-            val prev = AccrualCursor.get(applicationContext)
-            if (prev != null && snapshot.levelPct < prev) {
-                store.addDischarge(day, (prev - snapshot.levelPct).toDouble())
-            }
-            AccrualCursor.set(applicationContext, snapshot.levelPct)
+            // Shared accrual baseline (same one tick()/refresh() use), read and
+            // advanced under one lock so a drop is counted once, never twice.
+            val drop = AccrualCursor.accrue(applicationContext, snapshot.levelPct)
+            if (drop > 0) store.addDischarge(day, drop)
             store.ensureDay(day)
             store.insert(snapshot, analysis)
             // Fold this reading into the day's aggregates so week/month trends
@@ -41,6 +42,10 @@ class SampleWorker(context: Context, params: WorkerParameters) :
         }
         Result.success()
     } catch (e: Exception) {
-        Result.retry()
+        // Success, not retry: on a periodic request a retry replaces the next
+        // scheduled run and backs off to hours, so a lasting fault would kill the
+        // hourly rhythm. The next hourly run is the retry — losing one sample is
+        // cheaper than losing the cadence.
+        Result.success()
     }
 }

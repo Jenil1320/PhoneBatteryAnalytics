@@ -7,6 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -62,7 +65,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.rememberDatePickerState
 import io.github.jenil1320.cellspan.data.HistoryStore
+import io.github.jenil1320.cellspan.data.SampleScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -375,9 +388,12 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         },
                         color = Cell.TextPrimary, fontFamily = Sans, fontSize = 68.sp, fontWeight = FontWeight.Bold,
                         maxLines = 1, softWrap = false,
+                        // "~100" plus the "%" overflows this column at large font sizes, so let the
+                        // figure give way first and keep a reserved slot for the percent sign.
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     Text("%", color = Cell.TextMuted, fontFamily = Sans, fontSize = 24.sp, maxLines = 1,
-                        modifier = Modifier.padding(top = 10.dp))
+                        modifier = Modifier.widthIn(min = 20.dp).padding(top = 10.dp))
                 }
                 Spacer(Modifier.height(8.dp))
                 analysis?.let {
@@ -418,7 +434,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                 xStart = Fmt.isoDate(history.firstOrNull { it.sohPct != null }?.timestampMs), xEnd = "now",
                 threshold = BatteryAnalytics.REPLACE_SOH.toFloat(), thresholdLabel = "80%",
                 scatter = true, regressionLine = reg)
-            Text("Each dot is one health reading; the line is the trend through them. They scatter because a single reading is only an estimate — the trend is what matters.",
+            Text("Each dot is one day's average health reading; the line is the trend through them. Days still scatter because any one day is only an estimate — the trend is what matters.",
                 color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
@@ -470,14 +486,29 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                 Column {
                     SectionLabel("What's aging your battery")
                     Spacer(Modifier.height(10.dp))
-                    val cal = if (analysis.modeledHasCalendar) (analysis.modeledCalendarLossPct ?: 0.0) else 0.0
-                    val total = cyc + cal
-                    Text("Your battery has lost about ${total.roundToInt()}% of its capacity so far. Here's what caused it:",
+                    val calModel = if (analysis.modeledHasCalendar) (analysis.modeledCalendarLossPct ?: 0.0) else 0.0
+                    val modelTotal = cyc + calModel
+                    // The model's ABSOLUTE loss is what a typical cell of this age and cycle
+                    // count would have lost — rarely what this cell actually lost. So when a
+                    // measured State of Health exists, show the real loss and use the model
+                    // only for the split between the two causes. Showing the model's total
+                    // here would contradict the State-of-Health figure further up the screen.
+                    val measuredLoss = analysis.sohPct?.let { 100.0 - it }
+                    val fromMeasured = analysis.modeledHasCalendar && measuredLoss != null && modelTotal > 0.0
+                    val shownTotal = if (fromMeasured) measuredLoss!! else modelTotal
+                    val shownCyc = if (fromMeasured) measuredLoss!! * (cyc / modelTotal) else cyc
+                    val shownCal = if (fromMeasured) measuredLoss!! * (calModel / modelTotal) else calModel
+                    Text(
+                        // Without a battery age the model cannot compute its age/heat term, so
+                        // saying "you have lost <cyclic>%" would blame charging for all of it.
+                        if (analysis.modeledHasCalendar)
+                            "Your battery has lost about ${shownTotal.roundToInt()}% of its capacity so far. Here's what caused it:"
+                        else "Charging alone accounts for about ${cyc.roundToInt()}% of capacity loss. Age and heat add more on top — they are not counted here yet:",
                         color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 20.sp)
                     Spacer(Modifier.height(14.dp))
-                    HBar("Cycles", (cyc / 100.0).toFloat(), "−${cyc.roundToInt()}%", Cell.Warn)
+                    HBar("Cycles", (shownCyc / 100.0).toFloat(), "−${shownCyc.roundToInt()}%", Cell.Warn)
                     if (analysis.modeledHasCalendar) {
-                        HBar("Age/heat", (cal / 100.0).toFloat(), "−${cal.roundToInt()}%", Cell.AccentDeep)
+                        HBar("Age/heat", (shownCal / 100.0).toFloat(), "−${shownCal.roundToInt()}%", Cell.AccentDeep)
                     } else {
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 3.dp),
@@ -485,14 +516,14 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Text("Age/heat", color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp, modifier = Modifier.width(58.dp))
-                            Text("needs battery age", color = Cell.TextFaint, fontSize = 11.sp)
+                            Text("not counted — needs a start date", color = Cell.TextFaint, fontSize = 11.sp)
                         }
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(
                         if (analysis.modeledHasCalendar)
-                            "Charging wears the battery, and so do age and heat. This is a typical estimate for your cycle count."
-                        else "This is the wear from charging. Wear from age and heat needs the battery's make date, which Android hides from apps.",
+                            "The total is your own measured loss. How it splits between charging and age/heat comes from the wear model, using your cycle count, the battery's age and the temperatures Cellspan has recorded."
+                        else "Android hides the battery's make date, so Cellspan cannot work out the age-and-heat share on its own. Tell it roughly when the phone was bought, under Settings, and both figures appear.",
                         color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp,
                     )
                 }
@@ -589,19 +620,28 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
 }
 
 // ── Diagnose ─────────────────────────────────────────────────────────────────
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     snapshot: BatterySnapshot?,
     analysis: Analysis?,
     onOpenInfo: (String) -> Unit = {},
     onSetDesignCapacity: (Int?) -> Unit = {},
+    onSetBatteryStart: (Long?) -> Unit = {},
 ) {
     var showDesignDialog by remember { mutableStateOf(false) }
+    var showAgeDialog by remember { mutableStateOf(false) }
     if (showDesignDialog) {
         DesignCapacityDialog(
             current = analysis?.designCapacityMah,
             onDismiss = { showDesignDialog = false },
             onSave = { onSetDesignCapacity(it); showDesignDialog = false },
+        )
+    }
+    if (showAgeDialog) {
+        BatteryAgeDialog(
+            onDismiss = { showAgeDialog = false },
+            onSave = { onSetBatteryStart(it); showAgeDialog = false },
         )
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
@@ -610,6 +650,9 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
         ChargeAlarmCard(status)
+
+        Spacer(Modifier.height(16.dp))
+        BackgroundSamplingCard()
 
         Spacer(Modifier.height(16.dp))
         SurfaceCard {
@@ -624,9 +667,18 @@ fun SettingsScreen(
                 KeyValueRow("Design capacity",
                     analysis?.designCapacityMah?.let { "$it mAh" + if (analysis.designIsFromDatabase) " (typical)" else "" } ?: "—")
                 KeyValueRow("Cycle count", analysis?.cycleCount?.let { "$it" } ?: "not reported")
+                KeyValueRow("Battery age",
+                    analysis?.ageDays?.let { Fmt.age(it) + if (analysis.ageIsUserSet) " (you set)" else "" } ?: "not set")
                 Spacer(Modifier.height(6.dp))
+                // Without this the wear model drops its age/heat term, and charging looks
+                // responsible for the entire loss.
+                Text(if (analysis?.ageIsUserSet == true) "Change battery age" else "Set battery age",
+                    color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { showAgeDialog = true }.padding(vertical = 15.dp))
+                // Padding after clickable, so the tap target reaches 48dp — this link is the
+                // only way to correct the number the whole health calculation rests on.
                 Text("Set design capacity", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable { showDesignDialog = true }.padding(vertical = 3.dp))
+                    modifier = Modifier.clickable { showDesignDialog = true }.padding(vertical = 15.dp))
             }
         }
 
@@ -668,7 +720,12 @@ fun SettingsScreen(
                 Spacer(Modifier.height(12.dp))
                 Text("EXPORT RANGE", color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp, letterSpacing = 1.4.sp)
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                // Flow, not a Row: at large font scales the last chip would otherwise be
+                // squeezed to one character per line and become unpickable.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
                     ExportRange.entries.forEach { r ->
                         val sel = r == range
                         Box(
@@ -699,7 +756,10 @@ fun SettingsScreen(
         SurfaceCard {
             Column {
                 SectionLabel("Learn & privacy")
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
+                Text("As well as battery data, Cellspan reads whether Wi-Fi, Bluetooth, location services, battery saver and airplane mode are on or off, plus the screen brightness level — the on/off state only, never your position or any location data. Notifications are optional and are used only for the charge alarm.",
+                    color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
+                Spacer(Modifier.height(6.dp))
                 NavRow("Battery basics", "What the numbers mean, in plain words",
                     onClick = { onOpenInfo("basics") }, metric = Metric.HEALTH)
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Cell.Border))
@@ -719,7 +779,133 @@ private fun Tip(text: String) {
     }
 }
 
+/**
+ * Asks roughly when the battery started life. Stock Android hides the manufacture date,
+ * and without a date the wear model has to drop its age-and-heat term entirely — which
+ * makes charging look responsible for the whole loss. An approximate date is plenty:
+ * calendar ageing goes with days^0.75, so being a month or two out barely moves it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BatteryAgeDialog(onDismiss: () -> Unit, onSave: (Long?) -> Unit) {
+    val ctx = LocalContext.current
+    val current = AppPrefs.batteryStartMs(ctx)
+    val state = rememberDatePickerState(initialSelectedDateMillis = current)
+    val now = System.currentTimeMillis()
+    val picked = state.selectedDateMillis
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(enabled = picked != null && picked < now, onClick = { onSave(picked) }) { Text("Save") }
+        },
+        dismissButton = {
+            Row {
+                if (current != null) TextButton(onClick = { onSave(null) }) { Text("Clear") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    ) {
+        DatePicker(
+            state = state,
+            // The prompt goes in the title slot; a sibling Text above the picker is
+            // swallowed by the dialog's own layout.
+            title = {
+                Text("Roughly when did you get this phone? A month either way is fine.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 16.dp))
+            },
+        )
+    }
+}
+
+/**
+ * Background sampling control. The hourly reading is the user's choice, so the switch
+ * genuinely cancels the work rather than leaving it queued.
+ *
+ * Android throttles background work under Doze, which stretches the hourly rhythm on an
+ * idle phone. The honest fix is for the user to mark the app unrestricted, so we send
+ * them to the system screen. Cellspan never requests REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+ * itself — that permission is restricted on Google Play, and asking for it isn't needed
+ * to read the current state.
+ */
+@Composable
+private fun BackgroundSamplingCard() {
+    val ctx = LocalContext.current
+    var enabled by remember { mutableStateOf(AppPrefs.backgroundSampling(ctx)) }
+    var unrestricted by remember { mutableStateOf(SampleScheduler.isUnrestricted(ctx)) }
+    // Fires when the user comes back from the system screen, so the status re-reads itself.
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        unrestricted = SampleScheduler.isUnrestricted(ctx)
+    }
+    SurfaceCard {
+        Column {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionLabel("Background sampling")
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = {
+                        enabled = it
+                        AppPrefs.setBackgroundSampling(ctx, it)
+                        SampleScheduler.apply(ctx)
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Cell.Surface,
+                        checkedTrackColor = Cell.Accent,
+                        uncheckedThumbColor = Cell.TextFaint,
+                        uncheckedTrackColor = Cell.Track,
+                        uncheckedBorderColor = Cell.Border,
+                    ),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Cellspan takes one battery reading about every hour, so your charts stay complete when the app is closed. It never uses the network and costs very little power.",
+                color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+            )
+            if (enabled) {
+                Spacer(Modifier.height(10.dp))
+                if (unrestricted) {
+                    Text("Unrestricted — readings arrive on time.",
+                        color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                } else {
+                    Text(
+                        "Android may delay readings while the phone sits idle. Allow unrestricted background use to keep the hourly rhythm.",
+                        color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("Allow unrestricted background", color = Cell.Accent, fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable {
+                                // The battery-optimisation list first; app details as a fallback
+                                // for OEMs that don't ship the former.
+                                try {
+                                    settingsLauncher.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                } catch (e: Exception) {
+                                    try {
+                                        settingsLauncher.launch(
+                                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                Uri.fromParts("package", ctx.packageName, null))
+                                        )
+                                    } catch (e2: Exception) {
+                                        Toast.makeText(ctx, "Open Settings > Apps > Cellspan > Battery", Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                            // Padding after clickable, so the tap target reaches 48dp.
+                            .padding(vertical = 15.dp))
+                }
+            }
+        }
+    }
+}
+
 /** Charge-alarm control on the Now screen: pick a target level or turn it off. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChargeAlarmCard(status: String) {
     val ctx = LocalContext.current
@@ -747,7 +933,12 @@ private fun ChargeAlarmCard(status: String) {
             Text("Get a reminder to unplug at a set level, so the battery spends less time full.",
                 color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            // Flow, not a Row: at large font scales the last chip would otherwise be
+            // squeezed to one character per line and become unpickable.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
                 listOf(0, 80, 85, 90, 95).forEach { v ->
                     val sel = v == target
                     Box(

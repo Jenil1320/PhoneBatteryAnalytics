@@ -21,4 +21,17 @@ object AccrualCursor {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY, level.coerceIn(0, 100)).apply()
     }
+
+    /**
+     * Advance the cursor to [level] and return the drop that was consumed (0.0
+     * when the level did not fall, or when there is no previous value). This is
+     * the only safe way to accrue: the worker and the UI both accrue, and an
+     * unsynchronised read-compare-write lets them count the same drop twice.
+     */
+    @Synchronized
+    fun accrue(context: Context, level: Int): Double {
+        val prev = get(context)
+        set(context, level)
+        return if (prev != null && level < prev) (prev - level).toDouble() else 0.0
+    }
 }

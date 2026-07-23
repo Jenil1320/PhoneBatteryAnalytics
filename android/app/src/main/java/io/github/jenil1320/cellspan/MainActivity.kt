@@ -6,18 +6,22 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -34,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -110,6 +115,8 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
 
     Scaffold(
         containerColor = Color.Transparent,
+        // safeDrawing (not just systemBars) keeps content clear of a display cutout in landscape.
+        contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = { CellNavBar(tab) { tab = it } },
     ) { padding ->
         Box(Modifier.fillMaxSize().background(Cell.pageBackground).padding(padding)) {
@@ -122,6 +129,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                     state.snapshot, state.analysis,
                     onOpenInfo = { info = it },
                     onSetDesignCapacity = { mah -> AppPrefs.setDesignOverrideMah(ctx, mah); vm.refresh() },
+                    onSetBatteryStart = { ms -> AppPrefs.setBatteryStartMs(ctx, ms); vm.refresh() },
                 )
             }
         }
@@ -133,7 +141,9 @@ private fun CellNavBar(current: Tab, onSelect: (Tab) -> Unit) {
     Column(Modifier.fillMaxWidth().background(Cell.Surface)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Cell.Border))
         Row(
-            Modifier.fillMaxWidth().navigationBarsPadding().padding(top = 10.dp, bottom = 10.dp),
+            // The Scaffold's insets never reach the bottomBar slot, so the bar pads the cutout itself.
+            Modifier.fillMaxWidth().navigationBarsPadding().displayCutoutPadding()
+                .padding(top = 10.dp, bottom = 10.dp).selectableGroup(),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             Tab.entries.forEach { t ->
@@ -142,7 +152,10 @@ private fun CellNavBar(current: Tab, onSelect: (Tab) -> Unit) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.clickable { onSelect(t) }.padding(8.dp),
+                    // selectable, so TalkBack reads each tab as a tab and says which one is selected.
+                    modifier = Modifier
+                        .selectable(selected = active, role = Role.Tab, onClick = { onSelect(t) })
+                        .padding(8.dp),
                 ) {
                     Box(
                         Modifier

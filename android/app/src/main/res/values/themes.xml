@@ -1,8 +1,10 @@
 <resources>
     <style name="Theme.Cellspan" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/bg</item>
-        <item name="android:statusBarColor">@color/bg</item>
+        <!-- The UI is light, so the launch window and status bar must be light too:
+             below API 35 the status-bar icons are dark and vanish on a near-black bar. -->
+        <item name="android:windowBackground">@color/windowBg</item>
+        <item name="android:statusBarColor">@color/windowBg</item>
         <item name="android:navigationBarColor">@color/bg</item>
-        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

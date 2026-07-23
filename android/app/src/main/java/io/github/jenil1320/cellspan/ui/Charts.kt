@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.Mono
+import java.util.Locale
 
 /**
  * Annotated time-series line chart: y-axis value ticks, x-axis start/end labels,
@@ -165,7 +166,7 @@ fun TimeSeriesChart(
 
         // Scrub overlay: a crosshair at the nearest point, with a value/time tooltip.
         touchX?.let { tx ->
-            val cxTouch = tx.coerceIn(ml, ml + pw)
+            val cxTouch = tx.coerceIn(ml, ml + pw.coerceAtLeast(0f))
             val near = points.minByOrNull { kotlin.math.abs(px(it.first) - cxTouch) } ?: return@let
             val nx = px(near.first); val ny = py(near.second)
             var yy = mt
@@ -176,7 +177,9 @@ fun TimeSeriesChart(
             val text = xValueLabel?.invoke(near.first)?.let { "$it   ${yFormat(near.second)}" } ?: yFormat(near.second)
             val lay = tm.measure(text, tip)
             val boxW = lay.size.width + 16f; val boxH = lay.size.height + 10f
-            val boxX = (nx - boxW / 2f).coerceIn(ml, ml + pw - boxW)
+            // coerceIn throws when min > max, which happens once the tooltip is wider
+            // than the plot. Clamp in two steps so the left edge wins when space is tight.
+            val boxX = (nx - boxW / 2f).coerceAtMost(ml + pw - boxW).coerceAtLeast(ml)
             drawRoundRect(Cell.TileCharcoal, topLeft = Offset(boxX, mt), size = Size(boxW, boxH),
                 cornerRadius = CornerRadius(6f, 6f))
             drawText(lay, topLeft = Offset(boxX + 8f, mt + 5f))
@@ -190,7 +193,9 @@ fun UsageBars(
     bars: List<Pair<String, Float>>,
     modifier: Modifier = Modifier,
     height: Dp = 184.dp,
-    valueFormat: (Float) -> String = { String.format("%.2f", it) },
+    // Fixed locale: the caption above the chart writes a dot decimal, so the bar
+    // labels must not switch to a comma on comma-decimal locales.
+    valueFormat: (Float) -> String = { String.format(Locale.US, "%.2f", it) },
     barColor: Color = Cell.Accent,
 ) {
     val tm = rememberTextMeasurer()

@@ -7,12 +7,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,8 +22,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -71,27 +75,32 @@ fun OnboardingScreen(onDone: () -> Unit) {
     ) {
         HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
             val p = ONBOARD_PAGES[page]
-            Column(
-                Modifier.fillMaxSize().padding(horizontal = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Box(
-                    Modifier.size(120.dp).clip(CircleShape).background(Cell.AccentSoft),
-                    contentAlignment = Alignment.Center,
-                ) { MetricGlyph(p.metric, Cell.Accent, glyphSize = 56.dp) }
-                Spacer(Modifier.height(28.dp))
-                Text(p.title, color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-                Spacer(Modifier.height(12.dp))
-                Text(p.body, color = Cell.TextSecondary, fontSize = 15.sp, lineHeight = 22.sp,
-                    textAlign = TextAlign.Center)
-                if (p.usageGrant) {
-                    Spacer(Modifier.height(20.dp))
-                    PillButton("Grant usage access", filled = false) {
-                        runCatching {
-                            ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            // Short pages stay centred; when the page is taller than the viewport
+            // (landscape, tablets, split screen) it scrolls instead of clipping.
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                        .heightIn(min = maxHeight).padding(horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        Modifier.size(120.dp).clip(CircleShape).background(Cell.AccentSoft),
+                        contentAlignment = Alignment.Center,
+                    ) { MetricGlyph(p.metric, Cell.Accent, glyphSize = 56.dp) }
+                    Spacer(Modifier.height(28.dp))
+                    Text(p.title, color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp,
+                        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(12.dp))
+                    Text(p.body, color = Cell.TextSecondary, fontSize = 15.sp, lineHeight = 22.sp,
+                        textAlign = TextAlign.Center)
+                    if (p.usageGrant) {
+                        Spacer(Modifier.height(20.dp))
+                        PillButton("Grant usage access", filled = false) {
+                            runCatching {
+                                ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                            }
                         }
                     }
                 }

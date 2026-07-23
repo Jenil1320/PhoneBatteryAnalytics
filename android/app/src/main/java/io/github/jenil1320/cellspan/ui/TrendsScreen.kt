@@ -80,7 +80,8 @@ private fun vitalPoints(days: List<DailyVital>, sel: (DailyVital) -> Float?): Li
 @Composable
 fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsage: List<Pair<String, Double>>) {
     var range by rememberSaveable { mutableStateOf(TrendRange.DAY) }
-    var custom by remember { mutableStateOf<Pair<String, String>?>(null) }  // ISO day keys
+    // Saveable: a rotation must not silently drop the range the user picked.
+    var custom by rememberSaveable { mutableStateOf<Pair<String, String>?>(null) }  // ISO day keys
     var showPicker by rememberSaveable { mutableStateOf(false) }
     // "Live" = the intra-day view from the 24h log; otherwise we aggregate daily rows.
     val live = range == TrendRange.DAY && custom == null
@@ -106,11 +107,12 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         // Custom date range, within the ~31 days of daily history Cellspan keeps.
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            // The vertical padding sits inside the clickable, so it grows the touch target to ~48dp.
             Text(custom?.let { "Custom: ${dayLabel(it.first)} – ${dayLabel(it.second)}" } ?: "Pick a custom range",
                 color = if (custom != null) Cell.Accent else Cell.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickable { showPicker = true }.padding(vertical = 2.dp))
+                modifier = Modifier.clickable { showPicker = true }.padding(vertical = 15.dp))
             if (custom != null) Text("Clear", color = Cell.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickable { custom = null }.padding(vertical = 2.dp))
+                modifier = Modifier.clickable { custom = null }.padding(vertical = 15.dp))
         }
 
         val nowTs = socLog.lastOrNull()?.timestampMs ?: System.currentTimeMillis()

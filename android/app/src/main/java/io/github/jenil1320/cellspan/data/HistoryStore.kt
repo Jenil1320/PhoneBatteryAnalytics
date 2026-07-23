@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import io.github.jenil1320.cellspan.analytics.Analysis
+import kotlin.math.roundToInt
 
 /** One stored historical reading, used to draw trends over time. */
 data class HistoryPoint(
@@ -102,13 +103,21 @@ class HistoryStore(context: Context) :
         writableDatabase.insert("samples", null, values)
     }
 
-    fun recent(limit: Int = 500): List<HistoryPoint> {
+    /**
+     * The last [days] calendar days of trend points, one aggregated row per day, oldest
+     * first. Sampling is hourly, so a plain row cap would silently stop the trends growing
+     * after a few weeks; a day is the finest resolution these charts ever draw anyway.
+     * Every column is aggregated — a bare column under GROUP BY picks an arbitrary row.
+     */
+    fun recent(days: Int = 730): List<HistoryPoint> {
         val out = ArrayList<HistoryPoint>()
-        // Take the NEWEST `limit` rows, then present them oldest-first for charting.
         readableDatabase.rawQuery(
-            "SELECT ts, soh, cycles, capacity_mah, level, temp_c FROM " +
-                "(SELECT * FROM samples ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC",
-            arrayOf(limit.toString())
+            "SELECT ts, soh, cycles, capacity_mah, level, temp_c FROM (" +
+                "SELECT MAX(ts) AS ts, AVG(soh) AS soh, MAX(cycles) AS cycles, " +
+                "AVG(capacity_mah) AS capacity_mah, AVG(level) AS level, AVG(temp_c) AS temp_c " +
+                "FROM samples GROUP BY date(ts/1000,'unixepoch','localtime') " +
+                "ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC",
+            arrayOf(days.toString())
         ).use { c ->
             while (c.moveToNext()) {
                 out.add(
@@ -116,8 +125,8 @@ class HistoryStore(context: Context) :
                         timestampMs = c.getLong(0),
                         sohPct = if (c.isNull(1)) null else c.getDouble(1),
                         cycleCount = if (c.isNull(2)) null else c.getInt(2),
-                        capacityMah = if (c.isNull(3)) null else c.getInt(3),
-                        levelPct = c.getInt(4),
+                        capacityMah = if (c.isNull(3)) null else c.getDouble(3).roundToInt(),
+                        levelPct = if (c.isNull(4)) 0 else c.getDouble(4).roundToInt(),
                         temperatureC = if (c.isNull(5)) null else c.getFloat(5),
                     )
                 )
@@ -167,9 +176,14 @@ class HistoryStore(context: Context) :
     /** Append a frequently-sampled vitals point and prune old rows. */
     fun appendSoc(ts: Long, level: Int, tempC: Float?, voltageMv: Int?, currentMa: Int?) {
         writableDatabase.apply {
+            // Prune from the older of the new and the previously-newest timestamp: a clock
+            // jumped forwards would otherwise delete every live-chart row in one insert.
+            val previousMax = rawQuery("SELECT MAX(ts) FROM soc_log", null).use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else ts
+            }
             execSQL("INSERT INTO soc_log(ts, level, temp_c, voltage_mv, current_ma) VALUES(?,?,?,?,?)",
                 arrayOf<Any?>(ts, level, tempC, voltageMv, currentMa))
-            execSQL("DELETE FROM soc_log WHERE ts < ?", arrayOf<Any?>(ts - SOC_RETENTION_MS))
+            execSQL("DELETE FROM soc_log WHERE ts < ?", arrayOf<Any?>(minOf(ts, previousMax) - SOC_RETENTION_MS))
         }
     }
 
@@ -286,6 +300,15 @@ class HistoryStore(context: Context) :
             while (c.moveToNext()) {
                 if (!first) sb.append(","); first = false
                 sb.append("{\"ts\":${c.getLong(0)},\"start_level\":${num(c, 1)},\"end_level\":${num(c, 2)},\"measured_mah\":${c.getInt(3)}}")
+            }
+        }
+        sb.append("],\n\"sessions\":[")
+        db.rawQuery("SELECT start_ts,end_ts,start_level,end_level,charge_delta_uah,kind FROM sessions WHERE end_ts BETWEEN ? AND ? ORDER BY end_ts", tsArgs).use { c ->
+            var first = true
+            while (c.moveToNext()) {
+                if (!first) sb.append(","); first = false
+                sb.append("{\"start_ts\":${c.getLong(0)},\"end_ts\":${c.getLong(1)},\"start_level\":${c.getInt(2)}," +
+                    "\"end_level\":${c.getInt(3)},\"charge_delta_uah\":${num(c, 4)},\"kind\":\"${c.getString(5)}\"}")
             }
         }
         sb.append("]\n}")
