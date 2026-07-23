@@ -16,24 +16,40 @@ import kotlin.math.sqrt
  * simulator, itself a transcription of:
  *   Schmalstieg, Käbitz, Ecker, Sauer, "A holistic aging model for Li(NiMnCo)O2
  *   based 18650 lithium-ion batteries", J. Power Sources 257 (2014) 325–334
- *   (DOI 10.1016/j.jpowsour.2013.09.143).
+ *   (DOI 10.1016/j.jpowsour.2014.02.012).
  * Of the SimSES parameter sets it is the closest to a consumer LCO/NMC phone pouch
  * cell: NMC/graphite, a sloped voltage curve, and — unusually — parameterised in
  * cell *voltage*, which a phone actually measures. It is calibrated to a 4.2 V-max
  * 18650, so for modern phones charging to 4.4–4.45 V the numbers are approximate;
  * we present the output as "typical/modeled", never as a manufacturer figure.
  *
- * ## Calibration cross-check
- * With a typical phone mean voltage (~3.7 V) and depth-of-discharge, the cyclic
- * term alone predicts ≈19–20% capacity loss at 800 equivalent full cycles — which
- * matches Google's published Pixel rating of "up to 80% capacity for ~800 cycles".
+ * ## What the output is worth
+ * At 800 equivalent full cycles on a 4355 mAh cell the cyclic term alone gives about
+ * 21% loss. That figure is NOT a match for any manufacturer rating and must not be
+ * treated as one: an OEM's "80% at 800 cycles" is a whole-life field number that
+ * already contains years of calendar ageing, so anchoring the cyclic term to it and
+ * then adding a calendar term on top would double-count.
+ *
+ * Two honest limits:
+ *  - β carries units of Ah^-0.5 and was fitted to a single 2.05 Ah cell. Throughput is
+ *    not normalised by cell size (SimSES does not either), so predicted fractional loss
+ *    at a fixed cycle count grows with the square root of battery capacity: ~17.8% at
+ *    3000 mAh, ~21.4% at 4356 mAh, ~25.1% at 6000 mAh. Absolute output is only
+ *    calibrated near the reference cell size.
+ *  - The coefficients come from a 2013 cell. Applied to a modern phone pouch cell they
+ *    run pessimistic; the residual is real and is reported, not tuned away.
  */
 object DegradationModel {
 
-    // Fixed constants from the model / SimSES source.
+    // Model coefficients are from the paper. These four INPUTS are not: they are
+    // representative values chosen for a phone, and they carry most of the result.
     private const val DEFAULT_CYCLE_V = 3.7    // mean cell voltage over a phone cycle
     private const val DEFAULT_REST_V = 3.8     // mean rest (OCV) voltage for calendar
-    private const val DEFAULT_DOD = 0.7        // representative depth of discharge
+    // Depth of discharge dominates the cyclic term (~79% of beta). The published 0.7 is
+    // an EV/grid-storage figure; phones are topped up through the day and cycle much
+    // shallower, so 0.7 over-predicts wear badly. This is only the fallback — the app
+    // measures the real value from recorded discharge sessions when it has enough.
+    private const val DEFAULT_DOD = 0.5
     private const val DEFAULT_TEMP_C = 25.0
 
     data class Result(
@@ -45,6 +61,10 @@ object DegradationModel {
         val cyclicLossPct: Double,
         /** True when battery age was known, so the calendar term is included. */
         val hasCalendar: Boolean,
+        /** Depth of discharge actually used, so the UI can show the assumption. */
+        val dodUsed: Double,
+        /** Mean temperature actually used for the calendar term, °C. */
+        val tempUsedC: Double,
     )
 
     /**
@@ -76,10 +96,11 @@ object DegradationModel {
         // sample average is dominated by whatever state the phone has been in (e.g.
         // ~4.3 V while charging), which is a calendar-at-high-SoC condition, not the
         // cycle mean — feeding it here would wildly over-predict cyclic wear.
+        val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.05, 1.0)
+        val tempC = avgTempC ?: DEFAULT_TEMP_C
         var cyclic = 0.0
         if (equivalentFullCycles != null && equivalentFullCycles > 0 && designCapacityMah != null && designCapacityMah > 0) {
             val v = DEFAULT_CYCLE_V
-            val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.0, 1.0)
             val beta = 7.348e-3 * (v - 3.667).pow(2) + 7.6e-4 + 4.081e-3 * dod
             val throughputAh = equivalentFullCycles * (designCapacityMah / 1000.0)
             cyclic = beta * sqrt(throughputAh)
@@ -92,7 +113,7 @@ object DegradationModel {
         var calendar = 0.0
         var hasCalendar = false
         if (ageDays != null && ageDays > 0) {
-            val tK = (avgTempC ?: DEFAULT_TEMP_C) + 273.15
+            val tK = tempC + 273.15
             val v = DEFAULT_REST_V
             val alpha = (7.543 * v - 23.75) * 1e6 * exp(-6976.0 / tK)
             calendar = (alpha * ageDays.pow(0.75)).coerceAtLeast(0.0)
@@ -107,6 +128,8 @@ object DegradationModel {
             calendarLossPct = calendar * 100.0,
             cyclicLossPct = cyclic * 100.0,
             hasCalendar = hasCalendar,
+            dodUsed = dod,
+            tempUsedC = tempC,
         )
     }
 

@@ -1,7 +1,12 @@
 package io.github.jenil1320.cellspan
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -94,9 +99,25 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                delay(60_000)
-                vm.tick()
+            // Push updates: the battery broadcast fires the instant the level, status or
+            // temperature moves, so the orb tracks the phone in real time. The 60s tick
+            // stays as the persistence beat — the broadcast itself writes nothing.
+            val live = object : BroadcastReceiver() {
+                override fun onReceive(c: Context?, i: Intent?) { vm.liveUpdate() }
+            }
+            ContextCompat.registerReceiver(
+                ctx, live, IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            try {
+                while (true) {
+                    delay(60_000)
+                    vm.tick()
+                }
+            } finally {
+                // repeatOnLifecycle cancels this block on STOP, so the receiver never
+                // outlives the foreground.
+                runCatching { ctx.unregisterReceiver(live) }
             }
         }
     }

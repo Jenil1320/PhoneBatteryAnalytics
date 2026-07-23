@@ -74,6 +74,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.rememberDatePickerState
+import androidx.core.app.NotificationManagerCompat
 import io.github.jenil1320.cellspan.data.HistoryStore
 import io.github.jenil1320.cellspan.data.SampleScheduler
 import kotlinx.coroutines.Dispatchers
@@ -456,7 +457,12 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         SourceCol("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub,
                             conditionColor(analysis.condition), Modifier.weight(1f))
                         VDivider()
-                        SourceCol("Modeled", "${modeled.toInt()}%", "typical", Cell.Cool, Modifier.weight(1f))
+                        // A band, not a point: ±0.1 V assumed rest voltage, ±3 °C and
+                        // ±0.15 depth of discharge together move this by roughly 6 points,
+                        // so a single figure would claim precision the model hasn't got.
+                        SourceCol("Modeled",
+                            "${(modeled - 6).coerceAtLeast(0.0).toInt()}–${(modeled + 6).coerceAtMost(100.0).toInt()}%",
+                            "typical range", Cell.Cool, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(4.dp))
                     if (measured != null) {
@@ -471,8 +477,17 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                             modifier = Modifier.padding(top = 12.dp),
                         )
                     }
+                    // Name the inputs. Two of them are assumptions, and the model is only
+                    // as good as they are — hiding that would overstate the number.
+                    val dodTxt = analysis.modeledDoD?.let {
+                        "${(it * 100).roundToInt()}%" + if (analysis.modeledDoDIsMeasured) " (measured)" else " (assumed)"
+                    } ?: "—"
+                    val tempTxt = analysis.modeledTempC?.let { String.format(Locale.US, "%.0f°C", it) } ?: "—"
                     Text(
-                        "A typical wear estimate for this many charge cycles, based on published lithium-battery research. It is a reference, not a manufacturer figure.",
+                        "A typical wear estimate for this many charge cycles, based on published lithium-battery research. " +
+                            "It assumes a discharge depth of $dodTxt, a mean temperature of $tempTxt and a resting voltage of 3.8 V. " +
+                            "The research it comes from was fitted to a 2013 cell, so it runs a little pessimistic for a modern phone. " +
+                            "It is a reference, not a manufacturer figure.",
                         color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -667,14 +682,21 @@ fun SettingsScreen(
                 KeyValueRow("Design capacity",
                     analysis?.designCapacityMah?.let { "$it mAh" + if (analysis.designIsFromDatabase) " (typical)" else "" } ?: "—")
                 KeyValueRow("Cycle count", analysis?.cycleCount?.let { "$it" } ?: "not reported")
-                KeyValueRow("Battery age",
-                    analysis?.ageDays?.let { Fmt.age(it) + if (analysis.ageIsUserSet) " (you set)" else "" } ?: "not set")
-                Spacer(Modifier.height(6.dp))
-                // Without this the wear model drops its age/heat term, and charging looks
-                // responsible for the entire loss.
-                Text(if (analysis?.ageIsUserSet == true) "Change battery age" else "Set battery age",
-                    color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable { showAgeDialog = true }.padding(vertical = 15.dp))
+                // When the battery reports its own manufacture date there is nothing to ask
+                // and nothing to override, so the control disappears entirely.
+                val ageFromDevice = analysis?.ageDays != null && !analysis.ageIsUserSet
+                KeyValueRow("Battery age", analysis?.ageDays?.let {
+                    Fmt.age(it) + if (ageFromDevice) " (from battery)" else " (you set)"
+                } ?: "not set")
+                if (!ageFromDevice) {
+                    Spacer(Modifier.height(6.dp))
+                    // Only asked for because this phone won't hand over the date. Without
+                    // one the wear model drops its age/heat term and charging looks
+                    // responsible for the entire loss.
+                    Text(if (analysis?.ageIsUserSet == true) "Change battery age" else "Set battery age",
+                        color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable { showAgeDialog = true }.padding(vertical = 15.dp))
+                }
                 // Padding after clickable, so the tap target reaches 48dp — this link is the
                 // only way to correct the number the whole health calculation rests on.
                 Text("Set design capacity", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
@@ -910,7 +932,14 @@ private fun BackgroundSamplingCard() {
 private fun ChargeAlarmCard(status: String) {
     val ctx = LocalContext.current
     var target by remember { mutableStateOf(AppPrefs.chargeAlarmTarget(ctx)) }
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    // A blocked notification makes the alarm silently useless, so the card has to say so.
+    var notifsOn by remember { mutableStateOf(NotificationManagerCompat.from(ctx).areNotificationsEnabled()) }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+    }
+    val notifSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+    }
     fun apply(v: Int) {
         target = v
         AppPrefs.setChargeAlarmTarget(ctx, v)
@@ -921,6 +950,7 @@ private fun ChargeAlarmCard(status: String) {
             ChargeAlarm.cancel(ctx)
             ChargeAlarm.cancelNotification(ctx)
         }
+        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
     }
     SurfaceCard {
         Column {
@@ -930,8 +960,24 @@ private fun ChargeAlarmCard(status: String) {
                     color = if (target > 0) Cell.Accent else Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
             }
             Spacer(Modifier.height(6.dp))
-            Text("Get a reminder to unplug at a set level, so the battery spends less time full.",
+            Text("A reminder to unplug at a set level, so the battery spends less time full. Android gives apps no way to stop charging, so this notifies you — it does not cap the charge itself.",
                 color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
+            if (target > 0 && !notifsOn) {
+                Spacer(Modifier.height(8.dp))
+                Text("Notifications are switched off for Cellspan, so this alarm cannot reach you.",
+                    color = Cell.Bad, fontSize = 12.5.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
+                Text("Turn on notifications", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .clickable {
+                            runCatching {
+                                notifSettings.launch(
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+                                )
+                            }
+                        }
+                        .padding(vertical = 15.dp))
+            }
             Spacer(Modifier.height(10.dp))
             // Flow, not a Row: at large font scales the last chip would otherwise be
             // squeezed to one character per line and become unpickable.

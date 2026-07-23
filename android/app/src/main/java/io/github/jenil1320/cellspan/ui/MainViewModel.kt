@@ -42,6 +42,9 @@ private const val TREND_DAYS = 31
 
 private const val SOC_WINDOW_MS = 3L * 24 * 60 * 60 * 1000
 
+/** How far back to look when measuring the user's real depth of discharge. */
+private const val DOD_WINDOW_MS = 90L * 24 * 60 * 60 * 1000
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(UiState())
@@ -49,6 +52,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refresh()
+    }
+
+    /**
+     * Refresh just the live figures, driven by an ACTION_BATTERY_CHANGED broadcast so the
+     * orb and vitals move the moment the phone reports a change rather than waiting for
+     * the next poll. Deliberately does NO database work: that broadcast can fire every few
+     * seconds while charging, and the 60-second tick already owns persistence.
+     */
+    fun liveUpdate() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val snapshot = BatteryReader.read(getApplication())
+            _state.value = _state.value.copy(snapshot = snapshot, loading = false)
+        }
     }
 
     fun refresh() {
@@ -69,6 +85,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     analysis = BatteryAnalytics.analyze(
                         snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
                         avgTemp(vitals),
+                        // Real depth of discharge from recorded sessions. Without it the
+                        // model falls back to a representative constant and, historically,
+                        // to an EV-scale 0.7 that over-predicted wear badly.
+                        avgDoD = store.avgDischargeDoD(now - DOD_WINDOW_MS),
                         designOverrideMah = AppPrefs.designOverrideMah(getApplication()),
                         batteryStartMs = AppPrefs.batteryStartMs(getApplication()))
                     val last = store.lastSampleMs()
@@ -111,6 +131,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     analysis = BatteryAnalytics.analyze(
                         snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
                         avgTemp(vitals),
+                        // Real depth of discharge from recorded sessions. Without it the
+                        // model falls back to a representative constant and, historically,
+                        // to an EV-scale 0.7 that over-predicted wear badly.
+                        avgDoD = store.avgDischargeDoD(now - DOD_WINDOW_MS),
                         designOverrideMah = AppPrefs.designOverrideMah(getApplication()),
                         batteryStartMs = AppPrefs.batteryStartMs(getApplication()))
                     accrueDischarge(store, snapshot)
@@ -174,7 +198,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val cyc = hp.cycleCount
             if (soh != null && cyc != null) SohForecaster.Sample(soh, cyc.toDouble(), hp.timestampMs) else null
         }
+        // Same depth of discharge the displayed model used, so the forecast curve passes
+        // through the modelled point on screen instead of drifting away from it.
+        val dod = analysis.modeledDoD
         return SohForecaster.forecast(samples, cyclesNow, nowMs,
-            physicsLossFrac = { c -> DegradationModel.cyclicLossFrac(c, design) })
+            physicsLossFrac = { c -> DegradationModel.cyclicLossFrac(c, design, dod) })
     }
 }

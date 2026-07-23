@@ -71,7 +71,8 @@ object BatteryReader {
         // absent, so the PowerProfile fallback runs instead of reporting 0% health.
         val chargeFull = readLongNode("charge_full")?.takeIf { it in 1_000_000L..20_000_000L }
         val chargeFullDesign = readLongNode("charge_full_design")?.takeIf { it in 1_000_000L..20_000_000L }
-        val mfg = readLongNode("manufacturing_date")?.takeIf { it > 0 }
+        // Manufacture date, best source first: the platform property, then the raw node.
+        val mfg = readManufacturingDate(bm) ?: readLongNode("manufacturing_date")?.takeIf { it > 0 }
 
         return BatterySnapshot(
             timestampMs = System.currentTimeMillis(),
@@ -117,6 +118,43 @@ object BatteryReader {
     } catch (e: Throwable) {
         null
     }
+
+    /**
+     * The battery's manufacture date straight from the platform, in epoch SECONDS, or
+     * null when this device won't give it to us.
+     *
+     * `BATTERY_PROPERTY_MANUFACTURING_DATE` (7) exists from Android 14, but it is a
+     * hidden @SystemApi guarded by BATTERY_STATS, and system_server enforces that on its
+     * side — so on a normal phone this returns null and the user has to supply a date
+     * instead. BATTERY_STATS is signature|privileged|**development**, so it CAN be
+     * granted without root, once, over ADB:
+     *
+     *   adb shell pm grant io.github.jenil1320.cellspan android.permission.BATTERY_STATS
+     *
+     * after which the date is picked up automatically and survives reboots.
+     *
+     * Two traps this guards against: the denial arrives as a SecurityException across the
+     * binder rather than a sentinel value, so it must be caught or it crashes the caller;
+     * and AOSP's own docs disagree with their sample over seconds vs milliseconds, so the
+     * magnitude is sniffed rather than trusted.
+     */
+    private fun readManufacturingDate(bm: BatteryManager): Long? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return null
+        val raw = try {
+            bm.getLongProperty(BATTERY_PROPERTY_MANUFACTURING_DATE)
+        } catch (e: Throwable) {
+            return null      // SecurityException on any unprivileged device
+        }
+        if (raw == Long.MIN_VALUE || raw <= 0L) return null
+        // Seconds or milliseconds? Anything past ~5138 in seconds is really millis.
+        val seconds = if (raw > 100_000_000_000L) raw / 1000 else raw
+        // Sanity: a lithium cell made between 2005 and now-ish.
+        val nowSec = System.currentTimeMillis() / 1000
+        return seconds.takeIf { it in 1_100_000_000L..nowSec }
+    }
+
+    /** Hidden BatteryManager property id; the constant itself is @hide, the value is not. */
+    private const val BATTERY_PROPERTY_MANUFACTURING_DATE = 7
 
     private fun readLongNode(name: String): Long? = try {
         val f = File("$PSY/$name")

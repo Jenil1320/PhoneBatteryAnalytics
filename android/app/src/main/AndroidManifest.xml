@@ -8,6 +8,14 @@
     <!-- Granted by the user via Settings > Usage access, not at runtime. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- Lets the battery's own manufacture date be read instead of asking the user for it.
+         Ordinary installs never get this (signature|privileged|development), and the app
+         falls back to a user-supplied date — but because the level includes "development"
+         it can be granted once over ADB with no root:
+           adb shell pm grant io.github.jenil1320.cellspan android.permission.BATTERY_STATS
+         Every read is wrapped, so a denial is simply a missing date, never a crash. -->
+    <uses-permission android:name="android.permission.BATTERY_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- See launchable apps so their names resolve (avoids QUERY_ALL_PACKAGES). -->
     <queries>

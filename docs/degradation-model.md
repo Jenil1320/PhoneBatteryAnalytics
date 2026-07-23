@@ -33,7 +33,7 @@ Cyclic:    Q_loss,cyc = β_cap · sqrt(Q_throughput_Ah)
 | `t_days` | battery age | days |
 | `T` | temperature | **kelvin** (Arrhenius, used directly) |
 | `V` | mean cell voltage (calendar: mean rest/storage OCV; cyclic: mean voltage over a cycle) | volts |
-| `DoD` | representative depth of discharge | fraction 0–1 |
+| `DoD` | depth of discharge, measured from sessions where possible | fraction 0–1 |
 | `Q_throughput_Ah` | charge throughput = equivalent full cycles × design capacity (Ah) | Ah |
 | `Q_loss` | relative capacity loss | fraction (0.20 = 20 %) |
 
@@ -41,12 +41,19 @@ Fixed constants (verbatim from SimSES source / Schmalstieg 2014): calendar time
 exponent **0.75**, cyclic exponent **0.5** (√ throughput), cyclic-aging voltage
 vertex **3.667 V**, calendar activation energy ≈ 6976·R ≈ **58 kJ/mol**.
 
-## Calibration cross-check (Pixel 7)
+## What the cyclic term predicts (and why it is not anchored to an OEM rating)
 
-Google rates the Pixel 7 for **~80 % capacity after ~800 charge cycles**. With a
-typical phone cycle-mean voltage (~3.7 V) and DoD, the **cyclic term alone** predicts
-≈ 20 % loss at 800 equivalent full cycles (4355 mAh design) → ≈ **80 % modeled SoH** —
-independently matching Google's figure. This is the anchor the unit tests assert.
+With the fixed phone cycle-mean voltage (3.7 V) and a 4355 mAh design capacity, the
+**cyclic term alone** predicts **21.4 % loss at 800 equivalent full cycles** using the old
+DoD of 0.7, and **16.6 %** using the current 0.5 default. No calendar term is added at
+that point unless a battery age is known.
+
+**This figure is not a match for any manufacturer rating, and must not be tuned into
+one.** An OEM number such as "80 % capacity after ~800 cycles" is a *whole-life field
+rating*: it already includes years of calendar ageing as well as the cycling. If the
+cyclic term is anchored to that rating and a calendar term is then added on top, calendar
+ageing is counted twice. The unit tests therefore assert a wide sanity range at 800
+cycles, not a calibration target.
 
 ## Important input choices (data-accuracy)
 
@@ -57,12 +64,40 @@ independently matching Google's figure. This is the anchor the unit tests assert
   cyclic wear massively (it drove a spurious "61 % modeled" during testing before this
   was corrected). Cyclic wear is therefore driven by throughput (cycle count), which is
   what actually accumulates it.
-- **Calendar term is only computed when battery age is known.** A sandboxed app cannot
-  read the manufacture date (`manufacturing_date` in sysfs is SELinux-blocked for
-  untrusted apps), so on stock devices only the cyclic term contributes and the UI shows
-  "needs battery age" for the calendar component. With root / an ADB helper the calendar
-  term switches on using the measured mean voltage (clamped to the model's 2.5–4.2 V
-  window) and temperature.
+- **Calendar term is computed whenever a battery age is known — which is most of the
+  time.** The fuel gauge's manufacture date (`manufacturing_date` in sysfs) is
+  SELinux-blocked for untrusted apps, so a stock device does not expose it. The app
+  instead accepts a **user-supplied battery start date**, so the calendar term is active
+  for most users. The UI shows "needs battery age" only until a date is given.
+- **The calendar term always uses a fixed rest voltage of 3.8 V.** `DEFAULT_REST_V = 3.8`
+  is applied unconditionally. The app holds no measured rest voltage, and there is no
+  voltage clamp of any kind in the model. Root does not change this. The only measured
+  input to the calendar term is temperature, which is legitimate: calendar ageing really
+  does accrue at whatever temperature the cell sits at.
+- **Depth of discharge is measured, and it dominates the cyclic term.** DoD supplies
+  roughly **79 % of β_cap**, so it moves the result more than any other input. The
+  fallback default moved from **0.7 to 0.5** (`DEFAULT_DOD`): 0.7 is an EV/grid-storage
+  figure, and phones are topped up through the day and cycle far shallower, so 0.7
+  over-predicts wear. The app now **measures** the real value from recorded discharge
+  sessions — `HistoryStore.avgDischargeDoD`, depth-weighted, over a 90-day window, with a
+  minimum of 5 sessions — and falls back to 0.5 only when there are too few sessions.
+
+## Scale caveat: β is not normalised to cell size
+
+β_cap carries units of **Ah^-0.5** and was fitted to a single **2.05 Ah** cell.
+Throughput is fed in as raw Ah and is **not** normalised by cell size — SimSES does not
+normalise it either. Predicted fractional loss at a fixed cycle count therefore grows
+with the **square root of battery capacity**. At 800 equivalent full cycles and DoD 0.7:
+
+| Design capacity | Predicted cyclic loss |
+|---|---|
+| 3000 mAh | ≈ 17.8 % |
+| 4356 mAh | ≈ 21.4 % (the reference case above) |
+| 6000 mAh | ≈ 25.1 % |
+
+The absolute output is therefore only calibrated near the reference cell size. Relative
+comparisons (this cell against the model over time) survive the mismatch; absolute
+percentages on a much larger or smaller pack do not.
 
 ## Caveats (why it's labeled "typical", not a manufacturer figure)
 
@@ -75,6 +110,25 @@ structure and exponents transfer** (SEI-limited graphite-anode physics — √t 
 cell. Cellspan presents the output as a typical reference for comparison, never as an
 exact or manufacturer-accurate SoH.
 
+## Honest limits
+
+Three things about this model are worth stating plainly, because they bound what the
+output can mean.
+
+- **The coefficients come from a 2013 NMC 18650.** Applied to a modern phone pouch cell
+  they run **pessimistic**. That residual is real. It is reported as-is, not tuned away,
+  because tuning it against an OEM rating would reintroduce the double-count described
+  above.
+- **Three of the inputs are chosen representative values, not published constants.** The
+  cycle-mean voltage (3.7 V), the rest voltage (3.8 V) and the DoD fallback (0.5) are
+  engineering choices for a phone. Only the DoD is replaced by a measurement, and only
+  once enough discharge sessions exist. The published coefficients are exact; these
+  inputs are not.
+- **The UI presents a band, not a point.** Modeled SoH is shown as a **±6 percentage
+  point range** rather than a single figure. Roughly ±0.1 V on the assumed rest voltage,
+  ±3 °C on temperature and ±0.15 on DoD together move the result by about that much, so a
+  single number would claim precision the model does not have.
+
 ## Sources
 
 - **SimSES** (TU München, EES), archived: `https://gitlab.lrz.de/open-ees-ses/simses`
@@ -86,5 +140,6 @@ exact or manufacturer-accurate SoH.
   DOI 10.1016/j.est.2018.01.019 and 10.1016/j.jpowsour.2019.227666.
 - **Battery University BU-808** (consumer LCO/NMC calendar & cycle-vs-DoD trend tables,
   used as sanity checks): `https://batteryuniversity.com/article/bu-808-how-to-prolong-lithium-based-batteries`.
-- **Google Pixel battery longevity** (~80 % at ~800 cycles; Battery Health Assistance):
-  `https://support.google.com/pixelphone/answer/15738128`.
+- **Google Pixel battery longevity** (Battery Health Assistance; cited for context only —
+  its whole-life cycle rating is deliberately **not** used to calibrate this model, see
+  above): `https://support.google.com/pixelphone/answer/15738128`.

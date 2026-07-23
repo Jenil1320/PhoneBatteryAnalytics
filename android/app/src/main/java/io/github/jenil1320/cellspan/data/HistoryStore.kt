@@ -366,6 +366,33 @@ class HistoryStore(context: Context) :
      * Record one completed charge/discharge session. Skips implausibly short spans
      * (< 90 s) and bad level bounds so the History list stays meaningful.
      */
+    /**
+     * Depth-weighted mean depth of discharge (0–1) across recent discharge sessions, or
+     * null when there is too little history to trust.
+     *
+     * The wear model's cyclic term is dominated by this one number, and its published
+     * default (0.7) is an EV/grid-storage figure. Phones are topped up through the day and
+     * cycle far shallower, so assuming 0.7 badly over-states wear. Weighting each session
+     * by its own depth stops a run of tiny top-ups from dragging the mean to nothing —
+     * deep discharges both do more damage and deserve more say.
+     */
+    fun avgDischargeDoD(sinceMs: Long, minSessions: Int = 5): Double? {
+        var weighted = 0.0
+        var weight = 0.0
+        var n = 0
+        readableDatabase.rawQuery(
+            "SELECT start_level, end_level FROM sessions " +
+                "WHERE kind='discharge' AND end_ts >= ? AND start_level > end_level",
+            arrayOf(sinceMs.toString()),
+        ).use { c ->
+            while (c.moveToNext()) {
+                val d = (c.getInt(0) - c.getInt(1)) / 100.0
+                if (d > 0.0) { weighted += d * d; weight += d; n++ }
+            }
+        }
+        return if (n >= minSessions && weight > 0.0) (weighted / weight).coerceIn(0.05, 1.0) else null
+    }
+
     fun recordSession(startMs: Long, endMs: Long, startLevel: Int, endLevel: Int, chargeDeltaUah: Long?, isCharge: Boolean) {
         if (endMs - startMs < 90_000L) return
         if (startLevel !in 0..100 || endLevel !in 0..100) return

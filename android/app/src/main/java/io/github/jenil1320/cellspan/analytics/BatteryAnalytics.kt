@@ -38,6 +38,11 @@ data class Analysis(
     val modeledCalendarLossPct: Double? = null,
     val modeledCyclicLossPct: Double? = null,
     val modeledHasCalendar: Boolean = false,
+    /** Depth of discharge the model used, and whether it came from real sessions. */
+    val modeledDoD: Double? = null,
+    val modeledDoDIsMeasured: Boolean = false,
+    /** Mean temperature the model used for the calendar term, °C. */
+    val modeledTempC: Double? = null,
 )
 
 /**
@@ -212,6 +217,9 @@ object BatteryAnalytics {
             modeledCalendarLossPct = model?.calendarLossPct,
             modeledCyclicLossPct = model?.cyclicLossPct,
             modeledHasCalendar = model?.hasCalendar ?: false,
+            modeledDoD = model?.dodUsed,
+            modeledDoDIsMeasured = avgDoD != null,
+            modeledTempC = model?.tempUsedC,
         )
     }
 
