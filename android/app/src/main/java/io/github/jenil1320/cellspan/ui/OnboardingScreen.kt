@@ -55,7 +55,7 @@ private val ONBOARD_PAGES = listOf(
     OnboardPage(Metric.SOC, "Your data stays private",
         "Cellspan has no internet permission. Nothing leaves your phone. No accounts, no ads, no tracking."),
     OnboardPage(Metric.CYCLES, "It learns as you charge",
-        "Charge from 60% or below all the way to full a few times. Cellspan then measures your real battery health, not just an estimate."),
+        "Charge by at least 25% without unplugging a few times — 70% up to 95%, say. Cellspan then measures your real battery health, not just an estimate."),
     OnboardPage(Metric.CURRENT, "See what uses the screen",
         "You can allow \"Usage access\" so Cellspan can rank apps by screen time. This is optional and stays on your phone.",
         usageGrant = true),

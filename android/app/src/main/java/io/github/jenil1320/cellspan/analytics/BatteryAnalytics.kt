@@ -91,9 +91,16 @@ object BatteryAnalytics {
      * charge added ÷ fraction of battery gained. Null if the level gain is too
      * small to be reliable. This is AccuBattery's method and is far steadier
      * than the instantaneous estimate.
+     *
+     * [minGain] is 25 points rather than a stricter 40 because most people top up
+     * little and often: at 40 a user who charges from 70% never records a session at
+     * all and is stuck on the instantaneous estimate for good. A shallower session is
+     * individually noisier — quantisation error runs at roughly 1/gain — so the caller
+     * averages sessions WEIGHTED BY GAIN, which lets a deep session outvote a shallow
+     * one instead of discarding the shallow one entirely.
      */
     fun measuredCapacityMah(
-        startChargeUah: Long, endChargeUah: Long, startLevel: Int, endLevel: Int, minGain: Int = 40,
+        startChargeUah: Long, endChargeUah: Long, startLevel: Int, endLevel: Int, minGain: Int = 25,
     ): Int? {
         val dLevel = endLevel - startLevel
         if (dLevel < minGain) return null

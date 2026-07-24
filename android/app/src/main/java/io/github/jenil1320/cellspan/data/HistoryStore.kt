@@ -202,11 +202,34 @@ class HistoryStore(context: Context) :
     }
 
     /** Average measured capacity (mAh) over the most recent [n] sessions, or null. */
-    fun sessionCapacityMah(n: Int = 5): Int? =
-        readableDatabase.rawQuery(
+    /**
+     * Measured capacity across the most recent [n] charge sessions, weighted by how much
+     * each one actually charged.
+     *
+     * A session's error scales roughly with 1/gain, because the level it divides by is a
+     * whole percent. Weighting by gain therefore lets a deep charge outvote a shallow one
+     * in proportion to how much better it measures, which is what makes it safe to accept
+     * sessions from 25 points upward instead of only deep ones. Rows written before the
+     * endpoints were recorded have no usable gain, so they fall back to a plain mean.
+     */
+    fun sessionCapacityMah(n: Int = 10): Int? {
+        val weighted = readableDatabase.rawQuery(
+            "SELECT SUM(measured_mah * g), SUM(g) FROM (" +
+                "SELECT measured_mah, (end_level - start_level) AS g FROM capacity_sessions " +
+                "WHERE start_level IS NOT NULL AND end_level IS NOT NULL AND end_level > start_level " +
+                "ORDER BY ts DESC LIMIT ?)",
+            arrayOf(n.toString()),
+        ).use { c ->
+            if (c.moveToFirst() && !c.isNull(0) && !c.isNull(1) && c.getDouble(1) > 0.0) {
+                (c.getDouble(0) / c.getDouble(1)).toInt()
+            } else null
+        }
+        if (weighted != null) return weighted
+        return readableDatabase.rawQuery(
             "SELECT AVG(measured_mah) FROM (SELECT measured_mah FROM capacity_sessions ORDER BY ts DESC LIMIT ?)",
             arrayOf(n.toString())
         ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getDouble(0).toInt() else null }
+    }
 
     fun sessionCount(): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM capacity_sessions", null).use { c ->

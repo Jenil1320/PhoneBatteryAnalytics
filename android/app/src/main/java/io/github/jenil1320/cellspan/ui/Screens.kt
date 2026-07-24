@@ -432,7 +432,7 @@ fun HealthScreen(
         val holds = analysis?.sohPct?.toInt()
         Text(
             when {
-                holds == null -> "Charge from 60% or below all the way to full a few times and Cellspan will measure your battery's real health."
+                holds == null -> "Charge by at least 25% without unplugging a few times and Cellspan will measure your battery's real health."
                 analysis.capacitySource == CapacitySource.DEVICE ->
                     "Your phone reports your battery holds $holds% of its original capacity."
                 analysis.capacitySource == CapacitySource.SESSION ->
@@ -440,7 +440,7 @@ fun HealthScreen(
                 analysis.capacitySource == CapacitySource.GAUGE ->
                     "Your battery holds $holds% of the charge it did new."
                 else ->
-                    "Estimated at ~$holds% from a single reading — charge from 60% or below all the way to full a few times and Cellspan will measure it precisely."
+                    "Estimated at ~$holds% from a single reading — charge by at least 25% without unplugging a few times and Cellspan will measure it precisely."
             },
             color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 16.dp),
         )

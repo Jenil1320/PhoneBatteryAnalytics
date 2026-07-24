@@ -165,6 +165,16 @@ class BatteryAnalyticsTest {
     }
 
     @Test
+    fun measuredCapacity_acceptsAQuarterChargeButNotLess() {
+        // 25 points is the shallowest session we trust: a stricter bar means a user who
+        // tops up little and often never records one at all. 70% -> 95% on a 4000 mAh
+        // cell adds 1,000,000 uAh.
+        assertEquals(4000, BatteryAnalytics.measuredCapacityMah(2_800_000, 3_800_000, 70, 95))
+        // One point shallower is rejected, so the boundary cannot drift unnoticed.
+        assertNull(BatteryAnalytics.measuredCapacityMah(2_800_000, 3_760_000, 70, 94))
+    }
+
+    @Test
     fun measuredCapacity_fromSessionEndpoints() {
         // Charged 50% -> 90% adding 1,742,000 µAh -> full 4355 mAh.
         assertEquals(4355, BatteryAnalytics.measuredCapacityMah(1_500_000, 3_242_000, 50, 90))
