@@ -83,8 +83,7 @@ fun ConditionPill(label: String, color: Color) {
 /**
  * A bordered vitals tile: a metric glyph + label on top, big value, optional
  * sub-line, and an optional slim range gauge whose fill shows where the reading
- * sits within its normal span. Falls back to a small accent dot when no [metric]
- * is given, so older call sites are unchanged.
+ * sits within its normal span.
  */
 @Composable
 fun VitalTile(
@@ -94,7 +93,7 @@ fun VitalTile(
     modifier: Modifier = Modifier,
     accent: Color = Cell.TextPrimary,
     bg: Color = Cell.Surface,
-    metric: Metric? = null,
+    metric: Metric,
     gauge: Float? = null,
 ) {
     Box(
@@ -107,8 +106,7 @@ fun VitalTile(
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                if (metric != null) MetricGlyph(metric, accent, glyphSize = 15.dp)
-                else Box(Modifier.size(6.dp).clip(CircleShape).background(accent))
+                MetricGlyph(metric, accent, glyphSize = 15.dp)
                 SectionLabel(label)
             }
             Text(value, color = accent, fontFamily = Mono, fontSize = 20.sp,

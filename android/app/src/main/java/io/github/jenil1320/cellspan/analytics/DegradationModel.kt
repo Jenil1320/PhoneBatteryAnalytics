@@ -89,22 +89,12 @@ object DegradationModel {
         ageDays: Double? = null,
         avgTempC: Double? = null,
     ): Result? {
-        // Cyclic capacity loss (per-unit): β_cap · sqrt(Ah throughput). Schmalstieg's
-        // β_cap wants the MEAN cell voltage over a cycle (~3.7 V for a phone spanning
-        // its charge range), whose parabola bottoms at 3.667 V. We deliberately use a
-        // fixed representative cycle-mean rather than a measured average: the recent
-        // sample average is dominated by whatever state the phone has been in (e.g.
-        // ~4.3 V while charging), which is a calendar-at-high-SoC condition, not the
-        // cycle mean — feeding it here would wildly over-predict cyclic wear.
+        // Cyclic capacity loss (per-unit) comes from [cyclicLossFrac], which owns the one
+        // transcription of the term. Clamp the DoD here as well, because it is reported
+        // as dodUsed even on the calendar-only path where no cyclic term is computed.
         val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.05, 1.0)
         val tempC = avgTempC ?: DEFAULT_TEMP_C
-        var cyclic = 0.0
-        if (equivalentFullCycles != null && equivalentFullCycles > 0 && designCapacityMah != null && designCapacityMah > 0) {
-            val v = DEFAULT_CYCLE_V
-            val beta = 7.348e-3 * (v - 3.667).pow(2) + 7.6e-4 + 4.081e-3 * dod
-            val throughputAh = equivalentFullCycles * (designCapacityMah / 1000.0)
-            cyclic = beta * sqrt(throughputAh)
-        }
+        val cyclic = cyclicLossFrac(equivalentFullCycles ?: 0.0, designCapacityMah, dod)
 
         // Calendar capacity loss (per-unit): α_cap · days^0.75, only if age is known.
         // Uses a fixed representative rest voltage (see note above) and the measured
@@ -134,14 +124,22 @@ object DegradationModel {
     }
 
     /**
-     * Raw (unclamped) cyclic capacity-loss fraction the model predicts at a given cycle
-     * count. Monotone increasing in cycles, so the SoH forecaster can bisect it to find
-     * the projected 80% crossing. Uses the same fixed cycle-mean voltage as [estimate].
+     * Raw (unclamped) cyclic capacity-loss fraction: β_cap · sqrt(Ah throughput). This is
+     * the ONLY transcription of the cyclic term — [estimate] calls it too, so the reported
+     * figure and the forecaster's projection cannot drift apart. Monotone increasing in
+     * cycles, so the SoH forecaster can bisect it to find the projected 80% crossing.
+     *
+     * Schmalstieg's β_cap wants the MEAN cell voltage over a cycle (~3.7 V for a phone
+     * spanning its charge range), whose parabola bottoms at 3.667 V. We deliberately use a
+     * fixed representative cycle-mean rather than a measured average: the recent sample
+     * average is dominated by whatever state the phone has been in (e.g. ~4.3 V while
+     * charging), which is a calendar-at-high-SoC condition, not the cycle mean — feeding
+     * it here would wildly over-predict cyclic wear.
      */
     fun cyclicLossFrac(equivalentFullCycles: Double, designCapacityMah: Int?, avgDoD: Double? = null): Double {
         if (equivalentFullCycles <= 0.0 || designCapacityMah == null || designCapacityMah <= 0) return 0.0
         val v = DEFAULT_CYCLE_V
-        val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.0, 1.0)
+        val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.05, 1.0)
         val beta = 7.348e-3 * (v - 3.667).pow(2) + 7.6e-4 + 4.081e-3 * dod
         val throughputAh = equivalentFullCycles * (designCapacityMah / 1000.0)
         return beta * sqrt(throughputAh)

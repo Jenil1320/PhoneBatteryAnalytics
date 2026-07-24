@@ -14,12 +14,11 @@ import androidx.compose.ui.text.font.FontWeight
 import io.github.jenil1320.cellspan.R
 
 /**
- * Fresh light palette from palette.svg (Coolors): sage → teal → slate greens with
- * tan and pink accents. Light surfaces, white cards, and a row of saturated KPI
- * tiles — the same structure as the reference dashboard.
+ * Fresh light palette from palette.svg (Coolors): sage → teal → slate greens.
+ * Light surfaces, white cards, and a row of saturated KPI tiles — the same
+ * structure as the reference dashboard.
  *
- *   #cad2c5 sage-pale · #84a98c sage · #52796f teal · #354f52 slate
- *   #2f3e46 charcoal · #583e23 brown · #a7754d tan · #f06c9b pink
+ *   #84a98c sage · #52796f teal · #354f52 slate · #2f3e46 charcoal
  */
 object Cell {
     // Surfaces
@@ -28,7 +27,6 @@ object Cell {
     val BgElevated = Color(0xFFFFFFFF)  // cards
     val Surface = Color(0xFFFFFFFF)
     val SurfaceHi = Color(0xFFF4F7F1)
-    val Sidebar = Color(0xFFCAD2C5)     // sage-pale (nav / rails)
 
     val Border = Color(0x14354F52)      // subtle dark hairline on light
     val BorderHi = Color(0x24354F52)
@@ -42,7 +40,6 @@ object Cell {
     val AccentSoft = Color(0x2284A98C)
 
     // KPI tile fills (the saturated stat cards) + text that sits on them
-    val TileSage = Color(0xFF84A98C)
     val TileTeal = Color(0xFF52796F)
     val TileSlate = Color(0xFF354F52)
     val TileCharcoal = Color(0xFF2F3E46)
@@ -52,7 +49,6 @@ object Cell {
     // Text on light surfaces
     val TextPrimary = Color(0xFF2F3E46)   // charcoal
     val TextSecondary = Color(0xFF4A5A56)
-    val TextStatus = Color(0xFF52796F)
     val TextMuted = Color(0xFF77857D)
     val TextFaint = Color(0xFFA1ABA2)
 
@@ -61,9 +57,6 @@ object Cell {
     val Warn = Color(0xFFA7754D)   // tan
     val Bad = Color(0xFFB24A3A)    // warm red, harmonised with the browns
     val Cool = Color(0xFF5B8BA0)   // muted cool tone for temperature
-    val Pink = Color(0xFFF06C9B)   // secondary data series
-    val Tan = Color(0xFFA7754D)
-    val Brown = Color(0xFF583E23)
 
     val Track = Color(0xFFE3E8DF)  // chart / bar track on light
     val OrbBase = Color(0xFF2E3D38) // dark well behind the water orb, so light readout stays legible at any fill

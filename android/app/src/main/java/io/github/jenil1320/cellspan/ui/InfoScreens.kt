@@ -139,7 +139,8 @@ fun BatteryBasicsScreen(onBack: () -> Unit) {
                 "even when the phone is off. Cellspan shows both.")
 
         TermCard("Measured vs estimated",
-            "Cellspan measures your real health after a few charges past 20%. Before that, it shows an estimate from one reading, " +
+            "Cellspan measures your real health after you charge from 60% or below all the way to full a few times. " +
+                "Before that, it shows an estimate from one reading, " +
                 "marked with a \"~\" sign. The estimate can move a little. The measured value is steady.")
 
         Spacer(Modifier.height(80.dp))

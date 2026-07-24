@@ -18,7 +18,6 @@ enum class CapacitySource { DEVICE, GAUGE, SESSION, ESTIMATE, NONE }
 
 data class Analysis(
     val sohPct: Double?,
-    val sohIsEstimated: Boolean,
     val capacitySource: CapacitySource,
     val sessionCount: Int,
     val currentCapacityMah: Int?,
@@ -31,8 +30,6 @@ data class Analysis(
     val ageIsUserSet: Boolean = false,
     val avgCyclesPerMonth: Double?,
     val avgFadePerYear: Double?,
-    val etaSohMs: Long?,
-    val etaCyclesMs: Long?,
     // Modeled ("typical") health from the semi-empirical degradation model.
     val modeledSohPct: Double? = null,
     val modeledCalendarLossPct: Double? = null,
@@ -127,28 +124,31 @@ object BatteryAnalytics {
         val designIsFromDatabase = designOverrideMah == null &&
             designFromSysfs == null && designFromProfile == null && designFromTable != null
 
-        // Current full-charge capacity, best source first:
-        // exact gauge value → session-measured average → instantaneous estimate.
-        // The platform's own State of Health outranks everything: it is the
-        // manufacturer's figure, not one we derived.
+        // Current full-charge capacity, best source first: exact gauge value →
+        // session-measured average → the platform's own State of Health → instantaneous
+        // estimate. The platform figure sits below our own measurements on purpose. Many
+        // ROMs report a stub 100% for months and only admit real wear at some threshold,
+        // so trusting it first makes health jump upward the day it changes (e.g. 92% to
+        // 99%). That jump is then persisted into the history and flattens the trend.
         val deviceSoh = s.stateOfHealthPct?.takeIf { it in 1..100 }?.toDouble()
         val currentFromSysfs = s.chargeFullUah?.let { (it / 1000.0).toInt() }
         val currentEstimate = estimateFullCapacityMah(s.chargeCounterUah, s.levelPct)
         val currentMah: Int?
         val source: CapacitySource
         when {
+            currentFromSysfs != null -> { currentMah = currentFromSysfs; source = CapacitySource.GAUGE }
+            sessionMeasuredMah != null -> { currentMah = sessionMeasuredMah; source = CapacitySource.SESSION }
             deviceSoh != null -> {
                 currentMah = designMah?.let { (it * deviceSoh / 100.0).toInt() }
                 source = CapacitySource.DEVICE
             }
-            currentFromSysfs != null -> { currentMah = currentFromSysfs; source = CapacitySource.GAUGE }
-            sessionMeasuredMah != null -> { currentMah = sessionMeasuredMah; source = CapacitySource.SESSION }
             currentEstimate != null -> { currentMah = currentEstimate; source = CapacitySource.ESTIMATE }
             else -> { currentMah = null; source = CapacitySource.NONE }
         }
 
-        val sohIsEstimated = source == CapacitySource.ESTIMATE
-        val soh: Double? = deviceSoh ?:
+        // Health always follows the capacity the chosen branch produced, so the number and
+        // the source label can never describe different things.
+        val soh: Double? =
             if (currentMah != null && designMah != null && designMah > 0) {
                 val raw = currentMah.toDouble() / designMah * 100.0
                 // A fresh cell can read slightly over its rated design capacity, and
@@ -166,8 +166,6 @@ object BatteryAnalytics {
         var ageDays: Double? = null
         var cyclesPerMonth: Double? = null
         var fadePerYear: Double? = null
-        var etaSohMs: Long? = null
-        var etaCyclesMs: Long? = null
 
         val mfgFromGauge = s.manufacturingEpoch?.takeIf { it > 0 }
         val ageFromUser = mfgFromGauge == null && batteryStartMs != null && batteryStartMs < nowMs
@@ -178,20 +176,7 @@ object BatteryAnalytics {
                 ageDays = days
                 val months = days / DAYS_PER_MONTH
                 s.cycleCount?.let { c -> if (c > 0) cyclesPerMonth = c / months }
-                if (soh != null) {
-                    fadePerYear = (100.0 - soh) / (days / DAYS_PER_YEAR)
-                    val fadePerMonth = (100.0 - soh) / months
-                    if (fadePerMonth > 0 && soh > REPLACE_SOH) {
-                        val m = (soh - REPLACE_SOH) / fadePerMonth
-                        etaSohMs = nowMs + (m * DAYS_PER_MONTH * MS_PER_DAY).toLong()
-                    }
-                }
-                val cpm = cyclesPerMonth
-                val c = s.cycleCount
-                if (cpm != null && cpm > 0 && c != null && c < REPLACE_CYCLES) {
-                    val m = (REPLACE_CYCLES - c) / cpm
-                    etaCyclesMs = nowMs + (m * DAYS_PER_MONTH * MS_PER_DAY).toLong()
-                }
+                if (soh != null) fadePerYear = (100.0 - soh) / (days / DAYS_PER_YEAR)
             }
         }
 
@@ -206,7 +191,6 @@ object BatteryAnalytics {
 
         return Analysis(
             sohPct = soh,
-            sohIsEstimated = sohIsEstimated,
             capacitySource = source,
             sessionCount = sessionCount,
             currentCapacityMah = currentMah,
@@ -218,8 +202,6 @@ object BatteryAnalytics {
             ageIsUserSet = ageFromUser,
             avgCyclesPerMonth = cyclesPerMonth,
             avgFadePerYear = fadePerYear,
-            etaSohMs = etaSohMs,
-            etaCyclesMs = etaCyclesMs,
             modeledSohPct = model?.modeledSohPct,
             modeledCalendarLossPct = model?.calendarLossPct,
             modeledCyclicLossPct = model?.cyclicLossPct,
@@ -356,13 +338,5 @@ object BatteryAnalytics {
         val bands = IntArray(10)
         for (l in levels) bands[(l.coerceIn(0, 100) / 10).coerceAtMost(9)]++
         return bands.toList()
-    }
-
-    /** Parse the fuel gauge's `cycle_counts` string into charge-level bands. */
-    fun parseCycleCounts(raw: String?): List<Int>? {
-        if (raw.isNullOrBlank()) return null
-        val vals = raw.replace(",", " ").trim().split(Regex("\\s+"))
-            .mapNotNull { it.toIntOrNull() }
-        return vals.ifEmpty { null }
     }
 }

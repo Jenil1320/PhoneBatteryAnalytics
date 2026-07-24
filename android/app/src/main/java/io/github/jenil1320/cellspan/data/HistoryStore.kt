@@ -5,16 +5,12 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import io.github.jenil1320.cellspan.analytics.Analysis
-import kotlin.math.roundToInt
 
 /** One stored historical reading, used to draw trends over time. */
 data class HistoryPoint(
     val timestampMs: Long,
     val sohPct: Double?,
     val cycleCount: Int?,
-    val capacityMah: Int?,
-    val levelPct: Int,
-    val temperatureC: Float?,
 )
 
 /** A frequently-sampled point of live vitals (for real-time charts). */
@@ -57,7 +53,7 @@ class HistoryStore(context: Context) :
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """
-            CREATE TABLE samples (
+            CREATE TABLE IF NOT EXISTS samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts INTEGER NOT NULL,
                 soh REAL,
@@ -68,7 +64,7 @@ class HistoryStore(context: Context) :
             )
             """.trimIndent()
         )
-        db.execSQL("CREATE INDEX idx_samples_ts ON samples(ts)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts)")
         db.execSQL(DAILY_USAGE_DDL)
         db.execSQL(SOC_LOG_DDL)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_soc_ts ON soc_log(ts)")
@@ -112,9 +108,8 @@ class HistoryStore(context: Context) :
     fun recent(days: Int = 730): List<HistoryPoint> {
         val out = ArrayList<HistoryPoint>()
         readableDatabase.rawQuery(
-            "SELECT ts, soh, cycles, capacity_mah, level, temp_c FROM (" +
-                "SELECT MAX(ts) AS ts, AVG(soh) AS soh, MAX(cycles) AS cycles, " +
-                "AVG(capacity_mah) AS capacity_mah, AVG(level) AS level, AVG(temp_c) AS temp_c " +
+            "SELECT ts, soh, cycles FROM (" +
+                "SELECT MAX(ts) AS ts, AVG(soh) AS soh, MAX(cycles) AS cycles " +
                 "FROM samples GROUP BY date(ts/1000,'unixepoch','localtime') " +
                 "ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC",
             arrayOf(days.toString())
@@ -125,9 +120,6 @@ class HistoryStore(context: Context) :
                         timestampMs = c.getLong(0),
                         sohPct = if (c.isNull(1)) null else c.getDouble(1),
                         cycleCount = if (c.isNull(2)) null else c.getInt(2),
-                        capacityMah = if (c.isNull(3)) null else c.getDouble(3).roundToInt(),
-                        levelPct = if (c.isNull(4)) 0 else c.getDouble(4).roundToInt(),
-                        temperatureC = if (c.isNull(5)) null else c.getFloat(5),
                     )
                 )
             }
@@ -139,12 +131,6 @@ class HistoryStore(context: Context) :
     fun lastSampleMs(): Long? =
         readableDatabase.rawQuery("SELECT MAX(ts) FROM samples", null).use { c ->
             if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
-        }
-
-    /** Battery level of the most recent stored sample, or null if empty. */
-    fun lastLevel(): Int? =
-        readableDatabase.rawQuery("SELECT level FROM samples ORDER BY ts DESC LIMIT 1", null).use { c ->
-            if (c.moveToFirst() && !c.isNull(0)) c.getInt(0) else null
         }
 
     /** Ensure a calendar day exists in the usage table (so its bar renders at 0). */
@@ -240,6 +226,21 @@ class HistoryStore(context: Context) :
             arrayOf(n.toString())
         ).use { c -> while (c.moveToNext()) vals.add(c.getInt(0)) }
         vals.add(currentMah)
+        vals.sort()
+        return vals[vals.size / 2]
+    }
+
+    /**
+     * The same steadied capacity when there is no live reading to fold in: the median of
+     * the most recent [n] stored capacities, or null when nothing has been stored yet.
+     */
+    fun storedMedianCapacityMah(n: Int = 15): Int? {
+        val vals = ArrayList<Int>()
+        readableDatabase.rawQuery(
+            "SELECT capacity_mah FROM samples WHERE capacity_mah IS NOT NULL ORDER BY ts DESC LIMIT ?",
+            arrayOf(n.toString())
+        ).use { c -> while (c.moveToNext()) vals.add(c.getInt(0)) }
+        if (vals.isEmpty()) return null
         vals.sort()
         return vals[vals.size / 2]
     }
@@ -363,10 +364,6 @@ class HistoryStore(context: Context) :
     }
 
     /**
-     * Record one completed charge/discharge session. Skips implausibly short spans
-     * (< 90 s) and bad level bounds so the History list stays meaningful.
-     */
-    /**
      * Depth-weighted mean depth of discharge (0–1) across recent discharge sessions, or
      * null when there is too little history to trust.
      *
@@ -393,6 +390,10 @@ class HistoryStore(context: Context) :
         return if (n >= minSessions && weight > 0.0) (weighted / weight).coerceIn(0.05, 1.0) else null
     }
 
+    /**
+     * Record one completed charge/discharge session. Skips implausibly short spans
+     * (< 90 s) and bad level bounds so the History list stays meaningful.
+     */
     fun recordSession(startMs: Long, endMs: Long, startLevel: Int, endLevel: Int, chargeDeltaUah: Long?, isCharge: Boolean) {
         if (endMs - startMs < 90_000L) return
         if (startLevel !in 0..100 || endLevel !in 0..100) return

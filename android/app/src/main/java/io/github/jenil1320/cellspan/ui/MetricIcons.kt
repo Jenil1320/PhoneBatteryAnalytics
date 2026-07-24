@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import io.github.jenil1320.cellspan.ui.theme.Cell
 
 /** A battery parameter, each with its own hand-drawn glyph. */
-enum class Metric { TEMPERATURE, VOLTAGE, CURRENT, POWER, HEALTH, CHARGE, DRAIN, SOC, CYCLES }
+enum class Metric { TEMPERATURE, VOLTAGE, CURRENT, POWER, HEALTH, SOC, CYCLES }
 
 /**
  * Small line/solid glyph for a [Metric], drawn directly on a Canvas so the app
@@ -71,14 +71,6 @@ fun MetricGlyph(metric: Metric, tint: Color, modifier: Modifier = Modifier, glyp
                     close()
                 }
                 drawPath(heart, tint)
-            }
-            Metric.CHARGE -> {
-                drawLine(tint, p(0.5f, 0.84f), p(0.5f, 0.24f), sw, StrokeCap.Round)
-                drawPath(strokePath(0.30f to 0.46f, 0.5f to 0.20f, 0.70f to 0.46f), tint, style = stroke)
-            }
-            Metric.DRAIN -> {
-                drawLine(tint, p(0.5f, 0.16f), p(0.5f, 0.76f), sw, StrokeCap.Round)
-                drawPath(strokePath(0.30f to 0.54f, 0.5f to 0.80f, 0.70f to 0.54f), tint, style = stroke)
             }
             Metric.SOC -> {
                 drawRoundRect(tint, topLeft = Offset(0.16f * w, 0.30f * size.height),

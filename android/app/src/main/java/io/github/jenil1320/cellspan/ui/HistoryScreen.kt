@@ -62,17 +62,8 @@ private data class DrainsData(
     val sinceMs: Long = 0L,
 )
 
-private fun startOfDay(): Long = java.util.Calendar.getInstance().apply {
-    set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
-    set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
-}.timeInMillis
-
 private fun costColor(c: DrainCost) = when (c) {
     DrainCost.HIGH -> Cell.Bad; DrainCost.MEDIUM -> Cell.Warn; DrainCost.LOW -> Cell.Accent
-}
-private fun fmtDur(ms: Long): String {
-    val m = ms / 60000
-    return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
 }
 
 @Composable
@@ -85,7 +76,7 @@ fun HistoryScreen(sessions: List<Session>) {
             while (true) {
                 data = withContext(Dispatchers.IO) {
                     val now = System.currentTimeMillis()
-                    val since = startOfDay()
+                    val since = startOfToday()
                     val access = AppUsage.hasAccess(context)
                     DrainsData(
                         SystemDrains.read(context), access,
@@ -133,7 +124,7 @@ fun HistoryScreen(sessions: List<Session>) {
             Column {
                 SectionLabel("Estimated app drain · today")
                 data?.sinceMs?.takeIf { it > 0 }?.let { since ->
-                    Text("Since ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(since))} · estimated from screen time",
+                    Text("Since ${Fmt.time(since)} · estimated from screen time",
                         color = Cell.TextFaint, fontFamily = Mono, fontSize = 10.sp, modifier = Modifier.padding(top = 3.dp))
                 }
                 Spacer(Modifier.height(10.dp))
@@ -145,7 +136,7 @@ fun HistoryScreen(sessions: List<Session>) {
                             Text("No app usage recorded yet today.", color = Cell.TextMuted, fontSize = 13.sp)
                         } else {
                             val max = apps.maxOf { it.foregroundMs }.coerceAtLeast(1L)
-                            apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, fmtDur(it.foregroundMs), it.estMah) }
+                            apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, Fmt.duration(it.foregroundMs), it.estMah) }
                             Spacer(Modifier.height(8.dp))
                             Text("Rough estimate: screen time × your device's screen power. Exact per-app mAh needs a system permission normal apps can't use.",
                                 color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp)
@@ -188,7 +179,7 @@ private fun SessionCard(s: Session) {
     SurfaceCard {
         Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("${if (up) "Charge" else "Discharge"} · ${fmtDur(s.endMs - s.startMs)}",
+                Text("${if (up) "Charge" else "Discharge"} · ${Fmt.duration(s.endMs - s.startMs)}",
                     color = Cell.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 Box(
                     Modifier.clip(RoundedCornerShape(5.dp)).background(accent.copy(alpha = 0.14f))

@@ -183,20 +183,28 @@ private fun EnduranceRow(label: String, value: String, color: Color) {
 /** How far back the data export reaches. */
 private enum class ExportRange(val label: String, val days: Int?) {
     WEEK("7 days", 7), MONTH("30 days", 30), YEAR("1 year", 365), ALL("All", null);
-    fun sinceMs(nowMs: Long): Long = days?.let { nowMs - it * 86_400_000L } ?: 0L
+    /** "7 days" means today plus the six before it — midnight of day n-1, not n.
+     *  Calendar, not fixed day arithmetic, so a daylight-saving change can't shift the cut. */
+    fun sinceMs(): Long = days?.let { d ->
+        Calendar.getInstance().apply {
+            timeInMillis = startOfToday(); add(Calendar.DAY_OF_YEAR, -(d - 1))
+        }.timeInMillis
+    } ?: 0L
 }
-private fun startOfToday(): Long = Calendar.getInstance().apply {
+fun startOfToday(): Long = Calendar.getInstance().apply {
     set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
 }.timeInMillis
 
-private fun socToday(soc: List<SocPoint>): List<Pair<Float, Float>> {
-    val m = startOfToday()
-    val today = soc.filter { it.timestampMs >= m }
-    return today.map { ((it.timestampMs - m) / 3_600_000f) to it.levelPct.toFloat() }
+private fun socToday(soc: List<SocPoint>, dayStartMs: Long): List<Pair<Float, Float>> {
+    val today = soc.filter { it.timestampMs >= dayStartMs }
+    return today.map { ((it.timestampMs - dayStartMs) / 3_600_000f) to it.levelPct.toFloat() }
 }
 // ── Now ──────────────────────────────────────────────────────────────────────
 @Composable
-fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<Pair<String, Double>>, socLog: List<SocPoint>) {
+fun NowScreen(snapshot: BatterySnapshot?, dailyUsage: List<Pair<String, Double>>, socLog: List<SocPoint>) {
+    // Plain local, not remember: every battery broadcast recomposes this, and the boundary
+    // has to roll over at midnight rather than stick at the value it was first composed with.
+    val dayStart = startOfToday()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             SectionLabel("Right now")
@@ -304,12 +312,12 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
             }
         }
 
-        val todayPts = socToday(socLog)
+        val todayPts = socToday(socLog, dayStart)
         if (todayPts.size >= 2) {
             // Rest-of-day drain projection (dashed, capped at 8h) when discharging.
             val drainRaw = if (status == "Discharging" && dischargeRate != null && dischargeRate > 0.0)
                 DrainForecaster.restOfDayCurve(nowTs, level, dischargeRate, horizonMs = 8 * 3_600_000L) else emptyList()
-            val drainFc = drainRaw.map { (ts, soc) -> ((ts - startOfToday()) / 3_600_000f) to soc.toFloat() }
+            val drainFc = drainRaw.map { (ts, soc) -> ((ts - dayStart) / 3_600_000f) to soc.toFloat() }
             val drainEndMs = drainRaw.lastOrNull()?.first
             val reachesEmpty = (drainRaw.lastOrNull()?.second ?: 1.0) <= 0.0
             Spacer(Modifier.height(12.dp))
@@ -355,6 +363,10 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
     }
 }
 
+/** Half-width of the modelled-health band, in State-of-Health points. The band and the
+ *  verdict must be judged on the same number, or the card contradicts itself. */
+private const val MODEL_BAND_PTS = 6.0
+
 // ── Health ───────────────────────────────────────────────────────────────────
 @Composable
 fun HealthScreen(
@@ -371,10 +383,12 @@ fun HealthScreen(
                 append(snapshot?.model ?: "Battery"); analysis?.ageDays?.let { append(" · ${Fmt.age(it)}") }
             }, color = Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
         }
-        // "Firm" = a real measurement (fuel gauge or a completed charge session).
-        // Otherwise the value is just the noisy instantaneous estimate, shown as ~approx.
+        // "Firm" = a real measurement: the platform's own figure, the fuel gauge, or a
+        // completed charge session. Otherwise the value is just the noisy instantaneous
+        // estimate, shown as ~approx.
         val firm = analysis?.let {
-            it.capacitySource == CapacitySource.GAUGE || it.capacitySource == CapacitySource.SESSION
+            it.capacitySource == CapacitySource.DEVICE || it.capacitySource == CapacitySource.GAUGE ||
+                it.capacitySource == CapacitySource.SESSION
         } ?: false
         val sohInt = analysis?.sohPct?.toInt() ?: 0
         var target by remember { mutableIntStateOf(0) }
@@ -418,13 +432,15 @@ fun HealthScreen(
         val holds = analysis?.sohPct?.toInt()
         Text(
             when {
-                holds == null -> "Charge your phone past 20% a few times and Cellspan will measure your battery's real health."
+                holds == null -> "Charge from 60% or below all the way to full a few times and Cellspan will measure your battery's real health."
+                analysis.capacitySource == CapacitySource.DEVICE ->
+                    "Your phone reports your battery holds $holds% of its original capacity."
                 analysis.capacitySource == CapacitySource.SESSION ->
                     "Measured across ${analysis.sessionCount} charge session${if (analysis.sessionCount == 1) "" else "s"} — your battery holds about $holds% of its original capacity."
                 analysis.capacitySource == CapacitySource.GAUGE ->
                     "Your battery holds $holds% of the charge it did new."
                 else ->
-                    "Estimated at ~$holds% from a single reading — charge past 20% a few times and Cellspan will measure it precisely."
+                    "Estimated at ~$holds% from a single reading — charge from 60% or below all the way to full a few times and Cellspan will measure it precisely."
             },
             color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 16.dp),
         )
@@ -460,26 +476,33 @@ fun HealthScreen(
                         CapacitySource.ESTIMATE -> "estimate"
                         else -> ""
                     }
+                    // Without a battery start date the model drops its age/heat term, so this
+                    // column compares cycle count alone and must not claim otherwise.
+                    val hasCal = analysis.modeledHasCalendar
+                    // A band, not a point: the assumed rest voltage, temperature and depth of
+                    // discharge together move this by about MODEL_BAND_PTS points. The verdict
+                    // below is judged on these same two integers, so the card can never call a
+                    // battery "wearing faster" while printing a band that contains it.
+                    val loPts = (modeled - MODEL_BAND_PTS).coerceAtLeast(0.0).toInt()
+                    val hiPts = (modeled + MODEL_BAND_PTS).coerceAtMost(100.0).toInt()
                     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                         SourceCol("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub,
                             conditionColor(analysis.condition), Modifier.weight(1f))
                         VDivider()
-                        // A band, not a point: ±0.1 V assumed rest voltage, ±3 °C and
-                        // ±0.15 depth of discharge together move this by roughly 6 points,
-                        // so a single figure would claim precision the model hasn't got.
-                        SourceCol("Typical cell",
-                            "${(modeled - 6).coerceAtLeast(0.0).toInt()}–${(modeled + 6).coerceAtMost(100.0).toInt()}%",
-                            "same age & cycles", Cell.Cool, Modifier.weight(1f))
+                        SourceCol("Typical cell", "$loPts–$hiPts%",
+                            if (hasCal) "same age & cycles" else "same cycles only", Cell.Cool, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(4.dp))
                     if (measured != null) {
-                        val delta = measured - modeled
+                        val m = measured.toInt()
+                        val verdict = when {
+                            m > hiPts -> "Your battery is holding up better than a typical cell at ${analysis.cycleCount ?: "this"} cycles."
+                            m < loPts -> "Your battery is wearing a little faster than a typical cell at ${analysis.cycleCount ?: "this"} cycles."
+                            else -> "Your battery is tracking the typical wear curve for its cycle count."
+                        }
                         Text(
-                            when {
-                                delta >= 3 -> "Your battery is holding up better than a typical cell at ${analysis.cycleCount ?: "this"} cycles."
-                                delta <= -3 -> "Your battery is wearing a little faster than a typical cell at ${analysis.cycleCount ?: "this"} cycles."
-                                else -> "Your battery is tracking the typical wear curve for its cycle count."
-                            },
+                            if (hasCal) verdict
+                            else "$verdict That is a comparison of charging wear only — age and heat are left out here.",
                             color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
                             modifier = Modifier.padding(top = 12.dp),
                         )
@@ -494,11 +517,20 @@ fun HealthScreen(
                         // The two Health cards answer different questions and their totals
                         // will not match. Say so here, or the reader tries to reconcile
                         // "a typical cell is at 64-76%" with "you have lost 22%".
-                        "This is where a typical cell of the same age and cycle count would be — not your own loss. " +
-                            "Your measured figure is on the left; the card below splits YOUR loss into its causes, so the two totals differ. " +
-                            "A range, not a single number, because the model rests on assumptions: a discharge depth of $dodTxt, " +
-                            "a mean temperature of $tempTxt and a resting voltage of 3.8 V. Together those move the answer by about six points. " +
-                            "The research behind it was fitted to a 2013 cell, so it runs pessimistic for a modern phone. It is a reference, not a manufacturer figure.",
+                        // On the cycles-only path temperature and rest voltage never reach the
+                        // result, so naming them would credit the figure with inputs it lacks.
+                        if (hasCal)
+                            "This is where a typical cell of the same age and cycle count would be — not your own loss. " +
+                                "Your measured figure is on the left; the card below splits YOUR loss into its causes, so the two totals differ. " +
+                                "A range, not a single number, because the model rests on assumptions: a discharge depth of $dodTxt, " +
+                                "a mean temperature of $tempTxt and a resting voltage of 3.8 V. Together those move the answer by about six points. " +
+                                "The research behind it was fitted to a 2013 cell, so it runs pessimistic for a modern phone. It is a reference, not a manufacturer figure."
+                        else
+                            "This is where a typical cell at the same cycle count would be — not your own loss. Cellspan has no start date for this " +
+                                "battery, so age and heat are left out of the figure and it reads high for an older cell. " +
+                                "Your measured figure is on the left; the card below splits YOUR loss into its causes, so the two totals differ. " +
+                                "A range, not a single number, because the model assumes a discharge depth of $dodTxt. " +
+                                "The research behind it was fitted to a 2013 cell, so it runs pessimistic for a modern phone. It is a reference, not a manufacturer figure.",
                         color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -524,6 +556,9 @@ fun HealthScreen(
                     val shownTotal = if (fromMeasured) measuredLoss!! else modelTotal
                     val shownCyc = if (fromMeasured) measuredLoss!! * (cyc / modelTotal) else cyc
                     val shownCal = if (fromMeasured) measuredLoss!! * (calModel / modelTotal) else calModel
+                    // Round once, then derive the other half, or the two bars can print
+                    // figures that don't add up to the total stated just above them.
+                    val cycInt = shownCyc.roundToInt()
                     Text(
                         // Without a battery age the model cannot compute its age/heat term, so
                         // saying "you have lost <cyclic>%" would blame charging for all of it.
@@ -532,9 +567,10 @@ fun HealthScreen(
                         else "Charging alone accounts for about ${cyc.roundToInt()}% of capacity loss. Age and heat add more on top — they are not counted here yet:",
                         color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 20.sp)
                     Spacer(Modifier.height(14.dp))
-                    HBar("Cycles", (shownCyc / 100.0).toFloat(), "−${shownCyc.roundToInt()}%", Cell.Warn)
+                    HBar("Cycles", (shownCyc / 100.0).toFloat(), "−$cycInt%", Cell.Warn)
                     if (analysis.modeledHasCalendar) {
-                        HBar("Age/heat", (shownCal / 100.0).toFloat(), "−${shownCal.roundToInt()}%", Cell.AccentDeep)
+                        val calInt = shownTotal.roundToInt() - cycInt
+                        HBar("Age/heat", (shownCal / 100.0).toFloat(), "−$calInt%", Cell.AccentDeep)
                     } else {
                         Row(
                             Modifier.fillMaxWidth().padding(vertical = 3.dp),
@@ -566,7 +602,9 @@ fun HealthScreen(
             SurfaceCard {
                 Column {
                     SectionLabel("Forecast", color = Cell.Accent)
-                    val trendy = (fc.r2 ?: 0.0) >= 0.25
+                    // The forecaster already applies both halves of its reliability test, so
+                    // read its verdict rather than re-checking the fit alone.
+                    val trendy = fc.method == SohForecaster.Method.TREND
                     val atThreshold = (analysis?.sohPct ?: 100.0) <= 80.5
                     Text(
                         when {
@@ -743,7 +781,7 @@ fun SettingsScreen(
             if (uri != null) scope.launch(Dispatchers.IO) {
                 val ok = runCatching {
                     val now = System.currentTimeMillis()
-                    val json = HistoryStore(ctx).use { it.exportJson(now, range.sinceMs(now)) }
+                    val json = HistoryStore(ctx).use { it.exportJson(now, range.sinceMs()) }
                     val stream = ctx.contentResolver.openOutputStream(uri) ?: error("no output stream")
                     stream.use { os -> os.write(json.toByteArray()) }
                 }.isSuccess

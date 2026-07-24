@@ -62,7 +62,7 @@ object SohForecaster {
             return Forecast(
                 if (physicsEtaUnscaled != null) Method.PHYSICS_ONLY else Method.NONE,
                 physicsEtaUnscaled, null, null, null, null, null,
-                physicsCurve(cyclesNow, cpd, nowMs, physicsEtaUnscaled, physicsLossFrac),
+                physicsCurve(1.0, cyclesNow, cpd, nowMs, physicsEtaUnscaled, physicsLossFrac),
             )
         }
 
@@ -116,10 +116,13 @@ object SohForecaster {
             fadePerYear = physicsFadePerYear
             eta = etaPhysics
             lo = null; hi = null
-            curve = physicsCurve(cyclesNow, cpd, nowMs, eta, physicsLossFrac)
+            curve = physicsCurve(scale ?: 1.0, cyclesNow, cpd, nowMs, eta, physicsLossFrac)
         }
 
-        return Forecast(Method.TREND, eta, lo, hi, fadePerYear, scale, fit.r2, curve)
+        return Forecast(
+            if (reliableTrend) Method.TREND else Method.PHYSICS_ONLY,
+            eta, lo, hi, fadePerYear, scale, fit.r2, curve,
+        )
     }
 
     // ── math helpers (pure) ────────────────────────────────────────────────────
@@ -195,7 +198,11 @@ object SohForecaster {
         return out
     }
 
-    private fun physicsCurve(cyclesNow: Double, cpd: Double?, nowMs: Long, etaMs: Long?, lossFn: (Double) -> Double): List<Pair<Long, Double>> {
+    /**
+     * [scale] must be the same measured-vs-model ratio used for the projected date, or the
+     * drawn line would miss the 80% guide it is labelled with.
+     */
+    private fun physicsCurve(scale: Double, cyclesNow: Double, cpd: Double?, nowMs: Long, etaMs: Long?, lossFn: (Double) -> Double): List<Pair<Long, Double>> {
         if (cpd == null) return emptyList()
         // Project to eta, but always at least ~6 months so the chart shows a line.
         val minEnd = nowMs + (180.0 * DAY).toLong()
@@ -205,7 +212,7 @@ object SohForecaster {
         for (i in 0..steps) {
             val t = nowMs + (end - nowMs) * i / steps
             val cycles = cyclesNow + cpd * ((t - nowMs) / DAY)
-            out.add(t to (100.0 * (1.0 - lossFn(cycles))).coerceIn(0.0, 100.0))
+            out.add(t to (100.0 * (1.0 - scale * lossFn(cycles))).coerceIn(0.0, 100.0))
         }
         return out
     }

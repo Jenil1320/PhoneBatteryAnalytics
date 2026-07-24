@@ -62,13 +62,6 @@ class ForecasterTest {
 
     // ── Drain forecaster ───────────────────────────────────────────────────────
     @Test
-    fun typicalDailyDrain_isMedian() {
-        assertEquals(20.0, DrainForecaster.typicalDailyDrainPct(listOf(10.0, 20.0, 30.0))!!, 1e-6)
-        assertEquals(25.0, DrainForecaster.typicalDailyDrainPct(listOf(10.0, 20.0, 30.0, 40.0))!!, 1e-6)
-        assertNull(DrainForecaster.typicalDailyDrainPct(emptyList()))
-    }
-
-    @Test
     fun restOfDayCurve_projectsToEmpty() {
         // 50% at 10%/hr → empty in 5 hours.
         val curve = DrainForecaster.restOfDayCurve(now, 50, 10.0, stepMin = 60)
@@ -81,11 +74,5 @@ class ForecasterTest {
     fun restOfDayCurve_emptyWhenNotDischarging() {
         assertTrue(DrainForecaster.restOfDayCurve(0L, 50, 0.0).isEmpty())
         assertTrue(DrainForecaster.restOfDayCurve(0L, 0, 10.0).isEmpty())
-    }
-
-    @Test
-    fun smoothRate_ewma() {
-        assertEquals(10.0, DrainForecaster.smoothRate(null, 10.0), 1e-6)
-        assertEquals(0.3 * 20.0 + 0.7 * 10.0, DrainForecaster.smoothRate(10.0, 20.0), 1e-6)
     }
 }

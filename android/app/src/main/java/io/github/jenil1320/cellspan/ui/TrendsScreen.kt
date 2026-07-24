@@ -56,13 +56,28 @@ private fun dayEpoch(key: String): Long = try {
     SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(key)!!.time
 } catch (e: Exception) { 0L }
 
+private const val NO_DAILY_HISTORY = "Not enough daily history yet — keep Cellspan around for a few days."
+
+/**
+ * A live series and the instant its x-axis starts from. The origin travels with the
+ * points so the axis labels can never be worked out from a different reading than
+ * the one that actually drew the first point.
+ */
+private data class LiveSeries(val points: List<Pair<Float, Float>>, val t0: Long?) {
+    /** Label for x = 0; empty when the series has no points. */
+    val startLabel: String get() = Fmt.time(t0)
+    /** Turns an x value (hours since [t0]) back into a clock time. */
+    val xValueLabel: ((Float) -> String)? get() =
+        t0?.let { origin -> { x: Float -> Fmt.time(origin + (x * 3_600_000f).toLong()) } }
+}
+
 /** Intra-day points (last 24h) for a live vital, normalised to hours-since-first. */
-private fun dayPoints(soc: List<SocPoint>, nowTs: Long, sel: (SocPoint) -> Float?): List<Pair<Float, Float>> {
+private fun dayPoints(soc: List<SocPoint>, nowTs: Long, sel: (SocPoint) -> Float?): LiveSeries {
     val since = nowTs - 24 * 3_600_000L
     val pts = soc.filter { it.timestampMs >= since && sel(it) != null }
-    if (pts.isEmpty()) return emptyList()
+    if (pts.isEmpty()) return LiveSeries(emptyList(), null)
     val t0 = pts.first().timestampMs
-    return pts.map { ((it.timestampMs - t0) / 3_600_000f) to sel(it)!! }
+    return LiveSeries(pts.map { ((it.timestampMs - t0) / 3_600_000f) to sel(it)!! }, t0)
 }
 
 /**
@@ -138,19 +153,18 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         // ── Temperature ─────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
         if (live) {
-            val tp = dayPoints(socLog, nowTs, { it.temperatureC })
-            val t0t = socLog.firstOrNull { it.timestampMs >= since24 && it.temperatureC != null }?.timestampMs
-            TrendCard("Temperature · live", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
-                Fmt.time(t0t), "now", xMid = dayMid,
-                xValueLabel = t0t?.let { t0 -> { x: Float -> Fmt.time(t0 + (x * 3_600_000f).toLong()) } },
+            val temp = dayPoints(socLog, nowTs, { it.temperatureC })
+            TrendCard("Temperature · live", temp.points, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
+                temp.startLabel, "now", xMid = dayMid,
+                xValueLabel = temp.xValueLabel,
                 emptyMsg = "Battery temperature over the last 24 hours appears here as readings accumulate.") {
-                MinNowMaxRow(tp.map { it.second }) { String.format(Locale.US, "%.1f°C", it) }
+                MinNowMaxRow(temp.points.map { it.second }) { String.format(Locale.US, "%.1f°C", it) }
             }
         } else {
             val tp = vitalPoints(window, { it.tempAvg })
             TrendCard("Temperature · daily avg", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
                 xStartDays, xEndDays, xMid = aggMid,
-                emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.") {
+                emptyMsg = NO_DAILY_HISTORY) {
                 val mins = window.mapNotNull { it.tempMin }
                 val maxs = window.mapNotNull { it.tempMax }
                 if (mins.isNotEmpty() && maxs.isNotEmpty()) {
@@ -166,31 +180,29 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         // ── Voltage ─────────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
         if (live) {
-            val vp = dayPoints(socLog, nowTs, { it.voltageV })
-            val t0v = socLog.firstOrNull { it.timestampMs >= since24 && it.voltageV != null }?.timestampMs
-            TrendCard("Voltage · live", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
-                Fmt.time(t0v), "now", xMid = dayMid,
-                xValueLabel = t0v?.let { t0 -> { x: Float -> Fmt.time(t0 + (x * 3_600_000f).toLong()) } },
+            val volt = dayPoints(socLog, nowTs, { it.voltageV })
+            TrendCard("Voltage · live", volt.points, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
+                volt.startLabel, "now", xMid = dayMid,
+                xValueLabel = volt.xValueLabel,
                 emptyMsg = "Terminal voltage over the last 24 hours — updates while the app is open.") {
-                MinNowMaxRow(vp.map { it.second }) { String.format(Locale.US, "%.2f V", it) }
+                MinNowMaxRow(volt.points.map { it.second }) { String.format(Locale.US, "%.2f V", it) }
             }
         } else {
             val vp = vitalPoints(window, { it.voltAvg })
             TrendCard("Voltage · daily avg", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
                 xStartDays, xEndDays, xMid = aggMid,
-                emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.")
+                emptyMsg = NO_DAILY_HISTORY)
         }
 
         // ── Current ─────────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
         if (live) {
-            val cp = dayPoints(socLog, nowTs, { it.currentMa?.toFloat() })
-            val t0c = socLog.firstOrNull { it.timestampMs >= since24 && it.currentMa != null }?.timestampMs
-            TrendCard("Current · live", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
-                Fmt.time(t0c), "now", xMid = dayMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
-                xValueLabel = t0c?.let { t0 -> { x: Float -> Fmt.time(t0 + (x * 3_600_000f).toLong()) } },
+            val curr = dayPoints(socLog, nowTs, { it.currentMa?.toFloat() })
+            TrendCard("Current · live", curr.points, { "${it.toInt()} mA" }, Cell.AccentBright,
+                curr.startLabel, "now", xMid = dayMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
+                xValueLabel = curr.xValueLabel,
                 emptyMsg = "Charge/discharge current over the last 24 hours — updates while the app is open.") {
-                MinNowMaxRow(cp.map { it.second }) { "${it.toInt()} mA" }
+                MinNowMaxRow(curr.points.map { it.second }) { "${it.toInt()} mA" }
                 Spacer(Modifier.height(4.dp))
                 Text("Above the 0 mA line = charging, below = discharging.", color = Cell.TextFaint, fontSize = 11.sp)
             }
@@ -198,7 +210,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
             val cp = vitalPoints(window, { it.currAvg?.toFloat() })
             TrendCard("Current · daily avg", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
                 xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
-                emptyMsg = "Not enough daily history yet — keep Cellspan around for a few days.") {
+                emptyMsg = NO_DAILY_HISTORY) {
                 Text("Above the 0 mA line = net charging that day, below = net discharge.", color = Cell.TextFaint, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 6.dp))
             }

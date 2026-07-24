@@ -1,6 +1,5 @@
 package io.github.jenil1320.cellspan.data
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -17,6 +16,13 @@ import java.io.File
 object BatteryReader {
 
     private const val PSY = "/sys/class/power_supply/battery"
+
+    // Both of these describe the cell rather than its state, so they are read once and
+    // remembered. Each value is published before its flag, so another thread never sees
+    // "already read" with nothing behind it.
+    @Volatile private var designUah: Long? = null
+    @Volatile private var designRead = false
+    @Volatile private var mfgEpoch: Long? = null
 
     fun read(context: Context): BatterySnapshot {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
@@ -63,16 +69,16 @@ object BatteryReader {
         // Design capacity from the ROM's PowerProfile — the AccuBattery trick.
         // Works on nearly all devices regardless of manufacturer, so State of
         // Health is available even for phones not in DeviceCapacityTable.
-        val designFromProfile = readPowerProfileCapacityMah(context)
+        val designFromProfile = PowerProfileReader.batteryCapacityMah(context)
 
         // Best-effort fuel-gauge enrichment (usually blocked by SELinux on stock).
         // Some drivers expose these nodes but return 0/-1, or report mAh instead of
         // the expected µAh. Anything outside a plausible µAh range is treated as
         // absent, so the PowerProfile fallback runs instead of reporting 0% health.
+        // charge_full is re-read every time because it genuinely moves as the cell ages.
         val chargeFull = readLongNode("charge_full")?.takeIf { it in 1_000_000L..20_000_000L }
-        val chargeFullDesign = readLongNode("charge_full_design")?.takeIf { it in 1_000_000L..20_000_000L }
-        // Manufacture date, best source first: the platform property, then the raw node.
-        val mfg = readManufacturingDate(bm) ?: readLongNode("manufacturing_date")?.takeIf { it > 0 }
+        val chargeFullDesign = chargeFullDesignUah()
+        val mfg = manufacturingEpoch(bm)
         // The manufacturer's own health figure, when the device publishes one.
         val soh = readStateOfHealth(bm)
 
@@ -95,31 +101,29 @@ object BatteryReader {
             chargeFullDesignUah = chargeFullDesign,
             manufacturingEpoch = mfg,
             stateOfHealthPct = soh,
-            sysfsAvailable = chargeFull != null && chargeFullDesign != null,
         )
     }
 
+    /** Design charge is a constant of the cell, so the node is read at most once. */
+    private fun chargeFullDesignUah(): Long? {
+        if (designRead) return designUah
+        val v = readLongNode("charge_full_design")?.takeIf { it in 1_000_000L..20_000_000L }
+        designUah = v
+        designRead = true
+        return v
+    }
+
     /**
-     * Design capacity (mAh) from the framework's PowerProfile — the value every
-     * ROM ships in `frameworks/base` as `battery.capacity`. Reached by reflection
-     * because the class is `com.android.internal`, but it is widely readable and,
-     * unlike the fuel-gauge nodes, needs no SELinux exception. Best-effort: any
-     * failure (blocked hidden API, missing method) simply returns null and the
-     * caller falls back to the published-capacity table.
+     * Manufacture date, best source first: the platform property, then the raw node.
+     * A found date is remembered, but a null is deliberately not cached — the date starts
+     * working the moment BATTERY_STATS is granted over ADB, and that must be picked up
+     * without a restart.
      */
-    @SuppressLint("PrivateApi")
-    private fun readPowerProfileCapacityMah(context: Context): Int? = try {
-        val cls = Class.forName("com.android.internal.os.PowerProfile")
-        val instance = cls.getConstructor(Context::class.java).newInstance(context)
-        val mAh = try {
-            cls.getMethod("getBatteryCapacity").invoke(instance) as? Double
-        } catch (e: Throwable) {
-            cls.getMethod("getAveragePower", String::class.java)
-                .invoke(instance, "battery.capacity") as? Double
-        }
-        mAh?.takeIf { it > 1000.0 && it < 20000.0 }?.toInt()
-    } catch (e: Throwable) {
-        null
+    private fun manufacturingEpoch(bm: BatteryManager): Long? {
+        mfgEpoch?.let { return it }
+        val v = readManufacturingDate(bm) ?: readLongNode("manufacturing_date")?.takeIf { it > 0 }
+        if (v != null) mfgEpoch = v
+        return v
     }
 
     /**

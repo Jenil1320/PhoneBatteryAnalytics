@@ -111,9 +111,11 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
             try {
+                // Tick first, then wait: a resume otherwise shows the previous
+                // session's numbers for a full minute.
                 while (true) {
-                    delay(60_000)
                     vm.tick()
+                    delay(60_000)
                 }
             } finally {
                 // repeatOnLifecycle cancels this block on STOP, so the receiver never
@@ -149,7 +151,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     ) { padding ->
         Box(Modifier.fillMaxSize().background(Cell.pageBackground).padding(padding)) {
             when (tab) {
-                Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage, state.socLog)
+                Tab.NOW -> NowScreen(state.snapshot, state.dailyUsage, state.socLog)
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast,
                     onOpenInfo = { info = it })
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)

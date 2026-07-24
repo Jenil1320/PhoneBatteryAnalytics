@@ -21,13 +21,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 data class UiState(
-    val loading: Boolean = true,
     val snapshot: BatterySnapshot? = null,
     val analysis: Analysis? = null,
     val history: List<HistoryPoint> = emptyList(),
@@ -63,7 +63,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun liveUpdate() {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
-            _state.value = _state.value.copy(snapshot = snapshot, loading = false)
+            _state.update { it.copy(snapshot = snapshot) }
         }
     }
 
@@ -71,7 +71,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
             val now = System.currentTimeMillis()
-            var analysis = BatteryAnalytics.analyze(snapshot, now)
+            // Read once, outside the try: a database hiccup must not silently drop the
+            // user's own design capacity and battery start date from the fallback.
+            val designOverride = AppPrefs.designOverrideMah(getApplication())
+            val startMs = AppPrefs.batteryStartMs(getApplication())
+            var analysis = BatteryAnalytics.analyze(snapshot, now,
+                designOverrideMah = designOverride, batteryStartMs = startMs)
             var history: List<HistoryPoint> = emptyList()
             var usage: List<Pair<String, Double>> = emptyList()
             var socLog: List<SocPoint> = emptyList()
@@ -80,17 +85,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 HistoryStore(getApplication()).use { store ->
                     vitals = store.dailyVitals(TREND_DAYS)
-                    // Prefer session-measured capacity for a stable SoH; feed the
-                    // degradation model the daily-average temperature.
-                    analysis = BatteryAnalytics.analyze(
-                        snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
-                        avgTemp(vitals),
-                        // Real depth of discharge from recorded sessions. Without it the
-                        // model falls back to a representative constant and, historically,
-                        // to an EV-scale 0.7 that over-predicted wear badly.
-                        avgDoD = store.avgDischargeDoD(now - DOD_WINDOW_MS),
-                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()),
-                        batteryStartMs = AppPrefs.batteryStartMs(getApplication()))
+                    analysis = fullAnalysis(store, snapshot, now, vitals, designOverride, startMs)
                     val last = store.lastSampleMs()
                     if (last == null || snapshot.timestampMs - last > 10 * 60 * 1000) {
                         store.insert(snapshot, analysis)
@@ -109,9 +104,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 // history is best-effort; never let it crash the app
+                android.util.Log.w("Cellspan", "history store failed", e)
             }
             val forecast = runCatching { buildForecast(history, analysis, now) }.getOrNull()
-            _state.value = UiState(false, snapshot, analysis, history, usage, socLog, vitals, forecast, sessions)
+            _state.update {
+                it.copy(snapshot = snapshot, analysis = analysis, history = history,
+                    dailyUsage = usage, socLog = socLog, dailyVitals = vitals,
+                    sohForecast = forecast, sessions = sessions)
+            }
         }
     }
 
@@ -121,22 +121,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             val snapshot = BatteryReader.read(getApplication())
             val now = System.currentTimeMillis()
-            var analysis = BatteryAnalytics.analyze(snapshot, now)
-            var socLog = _state.value.socLog
-            var usage = _state.value.dailyUsage
-            var vitals = _state.value.dailyVitals
+            val designOverride = AppPrefs.designOverrideMah(getApplication())
+            val startMs = AppPrefs.batteryStartMs(getApplication())
+            var analysis = BatteryAnalytics.analyze(snapshot, now,
+                designOverrideMah = designOverride, batteryStartMs = startMs)
+            // Null until the store answers, so a failed read keeps whatever the
+            // screen already shows instead of blanking it.
+            var socLog: List<SocPoint>? = null
+            var usage: List<Pair<String, Double>>? = null
+            var vitals: List<DailyVital>? = null
+            // The tick is the only refresh a warm resume gets, so it re-reads
+            // history and sessions too.
+            var history = _state.value.history
+            var sessions = _state.value.sessions
             try {
                 HistoryStore(getApplication()).use { store ->
-                    vitals = store.dailyVitals(TREND_DAYS)
-                    analysis = BatteryAnalytics.analyze(
-                        snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
-                        avgTemp(vitals),
-                        // Real depth of discharge from recorded sessions. Without it the
-                        // model falls back to a representative constant and, historically,
-                        // to an EV-scale 0.7 that over-predicted wear badly.
-                        avgDoD = store.avgDischargeDoD(now - DOD_WINDOW_MS),
-                        designOverrideMah = AppPrefs.designOverrideMah(getApplication()),
-                        batteryStartMs = AppPrefs.batteryStartMs(getApplication()))
+                    val v = store.dailyVitals(TREND_DAYS)
+                    vitals = v
+                    analysis = fullAnalysis(store, snapshot, now, v, designOverride, startMs)
                     accrueDischarge(store, snapshot)
                     store.appendSoc(snapshot.timestampMs, snapshot.levelPct, snapshot.temperatureC,
                         mv(snapshot.voltageV), ma(snapshot.currentUa))
@@ -145,10 +147,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     analysis = smoothEstimate(store, analysis)
                     socLog = store.recentSoc(snapshot.timestampMs - SOC_WINDOW_MS)
                     usage = store.dailyUsage(7)
+                    history = store.recent()
+                    sessions = store.recentSessions(20)
                 }
-            } catch (e: Exception) { /* ignore */ }
-            _state.value = _state.value.copy(snapshot = snapshot, analysis = analysis,
-                socLog = socLog, dailyUsage = usage, dailyVitals = vitals)
+            } catch (e: Exception) {
+                android.util.Log.w("Cellspan", "history store failed", e)
+            }
+            val forecast = runCatching { buildForecast(history, analysis, now) }.getOrNull()
+            _state.update {
+                it.copy(snapshot = snapshot, analysis = analysis, history = history,
+                    dailyUsage = usage ?: it.dailyUsage, socLog = socLog ?: it.socLog,
+                    dailyVitals = vitals ?: it.dailyVitals,
+                    sohForecast = forecast, sessions = sessions)
+            }
         }
     }
 
@@ -170,21 +181,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         v.mapNotNull { it.tempAvg?.toDouble() }.average().takeIf { !it.isNaN() }
 
     /**
+     * The one analysis every caller uses: session-measured capacity for a stable SoH,
+     * the daily-average temperature for the degradation model, and the user's own
+     * settings. Kept in one place because the copy in refresh() and the copy in tick()
+     * drifted apart and produced two different SoH figures on one screen.
+     */
+    private fun fullAnalysis(store: HistoryStore, snapshot: BatterySnapshot, now: Long,
+                             vitals: List<DailyVital>, designOverride: Int?, startMs: Long?): Analysis =
+        BatteryAnalytics.analyze(
+            snapshot, now, store.sessionCapacityMah(), store.sessionCount(),
+            avgTemp(vitals),
+            // Real depth of discharge from recorded sessions. Without it the
+            // model falls back to a representative constant and, historically,
+            // to an EV-scale 0.7 that over-predicted wear badly.
+            avgDoD = store.avgDischargeDoD(now - DOD_WINDOW_MS),
+            designOverrideMah = designOverride,
+            batteryStartMs = startMs)
+
+    /**
      * Stabilise the displayed capacity/SoH when it's the noisy instantaneous estimate,
      * using a median of recent stored readings so the headline number stops bouncing
      * between refreshes. The raw sample is stored first, so the capacity scatter stays
      * honest; only the displayed headline is smoothed.
      */
     private fun smoothEstimate(store: HistoryStore, analysis: Analysis): Analysis {
-        if (analysis.capacitySource != CapacitySource.ESTIMATE) return analysis
-        val cur = analysis.currentCapacityMah ?: return analysis
+        if (analysis.capacitySource != CapacitySource.ESTIMATE &&
+            analysis.capacitySource != CapacitySource.NONE) return analysis
         val design = analysis.designCapacityMah ?: return analysis
         if (design <= 0) return analysis
-        val smoothed = store.medianCapacityMah(cur)
-        val soh = (smoothed.toDouble() / design * 100.0).coerceIn(0.0, 100.0)
+        val smoothed = if (analysis.capacitySource == CapacitySource.NONE) {
+            // Below ~15% there is no usable live reading at all, so lean entirely on
+            // what is already stored rather than leaving the Health screen blank.
+            store.storedMedianCapacityMah() ?: return analysis
+        } else {
+            store.medianCapacityMah(analysis.currentCapacityMah ?: return analysis)
+        }
+        // Same implausibility guard the analyser uses: reject the reading outright
+        // rather than clamping a nonsense capacity into a believable-looking SoH.
+        val ratio = smoothed.toDouble() / design * 100.0
+        if (ratio !in 0.0..130.0) return analysis
+        val soh = ratio.coerceAtMost(100.0)
         return analysis.copy(
             currentCapacityMah = smoothed,
             sohPct = soh,
+            // Still an estimate, whichever path got us here — the UI must say so.
+            capacitySource = CapacitySource.ESTIMATE,
             condition = BatteryAnalytics.conditionFor(soh, analysis.cycleCount),
         )
     }
@@ -198,10 +239,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val cyc = hp.cycleCount
             if (soh != null && cyc != null) SohForecaster.Sample(soh, cyc.toDouble(), hp.timestampMs) else null
         }
-        // Same depth of discharge the displayed model used, so the forecast curve passes
-        // through the modelled point on screen instead of drifting away from it.
+        // The physics baseline must match the "Measured vs modelled" card exactly: same
+        // depth of discharge, and the same calendar loss added on top. Cyclic-only here
+        // let the two cards judge the same cell against different baselines, so one
+        // screen could call the battery both better and worse than typical.
         val dod = analysis.modeledDoD
+        val calFrac = (analysis.modeledCalendarLossPct ?: 0.0) / 100.0
         return SohForecaster.forecast(samples, cyclesNow, nowMs,
-            physicsLossFrac = { c -> DegradationModel.cyclicLossFrac(c, design, dod) })
+            physicsLossFrac = { c -> calFrac + DegradationModel.cyclicLossFrac(c, design, dod) })
     }
 }

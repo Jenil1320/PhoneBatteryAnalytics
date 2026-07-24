@@ -11,13 +11,12 @@ object SessionTracker {
     private const val ACTIVE = "sess_active"
     private const val CC = "sess_start_cc"
     private const val LEVEL = "sess_start_level"
-    private const val TS = "sess_start_ts"
 
     private fun p(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun begin(c: Context, chargeCounterUah: Long, level: Int, ts: Long) {
+    fun begin(c: Context, chargeCounterUah: Long, level: Int) {
         p(c).edit().putBoolean(ACTIVE, true).putLong(CC, chargeCounterUah)
-            .putInt(LEVEL, level).putLong(TS, ts).apply()
+            .putInt(LEVEL, level).apply()
     }
 
     fun active(c: Context) = p(c).getBoolean(ACTIVE, false)

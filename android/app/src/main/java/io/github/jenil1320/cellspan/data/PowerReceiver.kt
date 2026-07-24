@@ -47,7 +47,7 @@ class PowerReceiver : BroadcastReceiver() {
                 // Session-based capacity measurement (needs the fuel-gauge charge counter).
                 if (cc != null) when (action) {
                     Intent.ACTION_POWER_CONNECTED ->
-                        SessionTracker.begin(app, cc, snap.levelPct, nowTs)
+                        SessionTracker.begin(app, cc, snap.levelPct)
 
                     Intent.ACTION_POWER_DISCONNECTED -> {
                         if (SessionTracker.active(app)) {

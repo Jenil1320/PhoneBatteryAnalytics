@@ -18,11 +18,17 @@ class SampleWorker(context: Context, params: WorkerParameters) :
 
     override fun doWork(): Result = try {
         val snapshot = BatteryReader.read(applicationContext)
-        val analysis = BatteryAnalytics.analyze(
-            snapshot, System.currentTimeMillis(),
-            batteryStartMs = AppPrefs.batteryStartMs(applicationContext),
-        )
         HistoryStore(applicationContext).use { store ->
+            // Analysed inside the store, so the hourly rows use the same session
+            // capacity and design override the screen does. Hourly rows outnumber
+            // foreground ones, so a different pipeline here would make the capacity
+            // chart contradict the headline.
+            val analysis = BatteryAnalytics.analyze(
+                snapshot, System.currentTimeMillis(),
+                sessionMeasuredMah = store.sessionCapacityMah(),
+                designOverrideMah = AppPrefs.designOverrideMah(applicationContext),
+                batteryStartMs = AppPrefs.batteryStartMs(applicationContext),
+            )
             val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(snapshot.timestampMs))
             // Shared accrual baseline (same one tick()/refresh() use), read and
             // advanced under one lock so a drop is counted once, never twice.

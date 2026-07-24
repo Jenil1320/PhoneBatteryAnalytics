@@ -6,7 +6,6 @@ import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.DeviceCapacityTable
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,7 +29,7 @@ class BatteryAnalyticsTest {
         levelPct = level, status = "Discharging", health = "Good", technology = "Li-ion",
         temperatureC = 30f, voltageV = 4.0f, currentUa = -400000, chargeCounterUah = chargeCounter,
         cycleCount = cycles, chargeFullUah = chargeFull, chargeFullDesignUah = chargeFullDesign,
-        manufacturingEpoch = mfg, sysfsAvailable = chargeFull != null && chargeFullDesign != null,
+        manufacturingEpoch = mfg,
     )
 
     @Test
@@ -68,15 +67,13 @@ class BatteryAnalyticsTest {
             nowMs,
         )
         assertEquals(83.0, a.sohPct!!, 0.3)
-        assertFalse(a.sohIsEstimated)
+        assertEquals(io.github.jenil1320.cellspan.analytics.CapacitySource.GAUGE, a.capacitySource)
         assertEquals(3642, a.currentCapacityMah)
         assertEquals(4386, a.designCapacityMah)
         assertFalse(a.designIsFromDatabase)
         assertEquals(Condition.FAIR, a.condition)
         assertTrue("age should be ~3.7y", a.ageDays!! > 1300 && a.ageDays!! < 1400)
         assertEquals(18.0, a.avgCyclesPerMonth!!, 1.0)
-        assertNotNull("796<800 so a cycle ETA exists", a.etaCyclesMs)
-        assertTrue(a.etaCyclesMs!! > nowMs)
     }
 
     @Test
@@ -85,7 +82,7 @@ class BatteryAnalyticsTest {
             snapshot(level = 36, chargeCounter = 1_264_000, cycles = 796, model = "Pixel 7"),
             nowMs,
         )
-        assertTrue(a.sohIsEstimated)
+        assertEquals(io.github.jenil1320.cellspan.analytics.CapacitySource.ESTIMATE, a.capacitySource)
         assertTrue(a.designIsFromDatabase)
         assertEquals(4355, a.designCapacityMah)      // from table
         assertEquals(3511, a.currentCapacityMah)      // estimated
@@ -186,7 +183,6 @@ class BatteryAnalyticsTest {
         assertEquals(io.github.jenil1320.cellspan.analytics.CapacitySource.SESSION, a.capacitySource)
         assertEquals(3900, a.currentCapacityMah)
         assertEquals(4, a.sessionCount)
-        assertFalse(a.sohIsEstimated)
         assertEquals(89.6, a.sohPct!!, 0.5) // 3900/4355
     }
 
@@ -278,14 +274,5 @@ class BatteryAnalyticsTest {
         assertEquals(2, d[1])   // 12 and 15
         assertEquals(2, d[9])   // 100 (clamped) and 99
         assertEquals(6, d.sum())
-    }
-
-    @Test
-    fun parseCycleCounts_readsBands() {
-        val bands = BatteryAnalytics.parseCycleCounts("2867 8354 11070 11313 11102 10334 9503 8209 6563 3748")
-        assertEquals(10, bands!!.size)
-        assertEquals(83063, bands.sum())
-        assertNull(BatteryAnalytics.parseCycleCounts(null))
-        assertNull(BatteryAnalytics.parseCycleCounts("   "))
     }
 }

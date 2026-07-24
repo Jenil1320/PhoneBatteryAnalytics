@@ -3,6 +3,12 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Reading the adapter's on/off state needs BLUETOOTH up to API 30; from API 31 the
+         state is readable without it. The permission implies a hardware requirement, so
+         the uses-feature line is mandatory — without it Play hides the app from devices
+         with no Bluetooth radio. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <!-- Only used for the optional charge alarm; requested at runtime on Android 13+. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Granted by the user via Settings > Usage access, not at runtime. -->
