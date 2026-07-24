@@ -51,6 +51,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.jenil1320.cellspan.ui.BatteryAgeInfoScreen
 import io.github.jenil1320.cellspan.ui.BatteryBasicsScreen
 import io.github.jenil1320.cellspan.ui.HealthScreen
 import io.github.jenil1320.cellspan.ui.HistoryScreen
@@ -129,6 +130,12 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
             when (info) {
                 "basics" -> BatteryBasicsScreen(onBack = { info = null })
                 "privacy" -> PrivacyPolicyScreen(onBack = { info = null })
+                // Closing the page before jumping to Settings, so back does not land
+                // the user on the explainer again after they set the date.
+                "age" -> BatteryAgeInfoScreen(
+                    onBack = { info = null },
+                    onSetDate = { info = null; tab = Tab.SETTINGS },
+                )
             }
         }
         return
@@ -143,7 +150,8 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
         Box(Modifier.fillMaxSize().background(Cell.pageBackground).padding(padding)) {
             when (tab) {
                 Tab.NOW -> NowScreen(state.snapshot, state.analysis, state.dailyUsage, state.socLog)
-                Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast)
+                Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast,
+                    onOpenInfo = { info = it })
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
                 Tab.HISTORY -> HistoryScreen(state.sessions)
                 Tab.SETTINGS -> SettingsScreen(

@@ -357,7 +357,13 @@ fun NowScreen(snapshot: BatterySnapshot?, analysis: Analysis?, dailyUsage: List<
 
 // ── Health ───────────────────────────────────────────────────────────────────
 @Composable
-fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<HistoryPoint>, forecast: SohForecaster.Forecast? = null) {
+fun HealthScreen(
+    snapshot: BatterySnapshot?,
+    analysis: Analysis?,
+    history: List<HistoryPoint>,
+    forecast: SohForecaster.Forecast? = null,
+    onOpenInfo: (String) -> Unit = {},
+) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             SectionLabel("State of Health")
@@ -461,9 +467,9 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                         // A band, not a point: ±0.1 V assumed rest voltage, ±3 °C and
                         // ±0.15 depth of discharge together move this by roughly 6 points,
                         // so a single figure would claim precision the model hasn't got.
-                        SourceCol("Modeled",
+                        SourceCol("Typical cell",
                             "${(modeled - 6).coerceAtLeast(0.0).toInt()}–${(modeled + 6).coerceAtMost(100.0).toInt()}%",
-                            "typical range", Cell.Cool, Modifier.weight(1f))
+                            "same age & cycles", Cell.Cool, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(4.dp))
                     if (measured != null) {
@@ -485,10 +491,14 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     } ?: "—"
                     val tempTxt = analysis.modeledTempC?.let { String.format(Locale.US, "%.0f°C", it) } ?: "—"
                     Text(
-                        "A typical wear estimate for this many charge cycles, based on published lithium-battery research. " +
-                            "It assumes a discharge depth of $dodTxt, a mean temperature of $tempTxt and a resting voltage of 3.8 V. " +
-                            "The research it comes from was fitted to a 2013 cell, so it runs a little pessimistic for a modern phone. " +
-                            "It is a reference, not a manufacturer figure.",
+                        // The two Health cards answer different questions and their totals
+                        // will not match. Say so here, or the reader tries to reconcile
+                        // "a typical cell is at 64-76%" with "you have lost 22%".
+                        "This is where a typical cell of the same age and cycle count would be — not your own loss. " +
+                            "Your measured figure is on the left; the card below splits YOUR loss into its causes, so the two totals differ. " +
+                            "A range, not a single number, because the model rests on assumptions: a discharge depth of $dodTxt, " +
+                            "a mean temperature of $tempTxt and a resting voltage of 3.8 V. Together those move the answer by about six points. " +
+                            "The research behind it was fitted to a 2013 cell, so it runs pessimistic for a modern phone. It is a reference, not a manufacturer figure.",
                         color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 8.dp),
                     )
                 }
@@ -539,9 +549,14 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     Text(
                         if (analysis.modeledHasCalendar)
                             "The total is your own measured loss. How it splits between charging and age/heat comes from the wear model, using your cycle count, the battery's age and the temperatures Cellspan has recorded."
-                        else "Android hides the battery's make date, so Cellspan cannot work out the age-and-heat share on its own. Tell it roughly when the phone was bought, under Settings, and both figures appear.",
+                        else "Android hides the battery's make date, so Cellspan cannot work out the age-and-heat share on its own.",
                         color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp,
                     )
+                    if (!analysis.modeledHasCalendar) {
+                        Text("How to unlock this", color = Cell.Accent, fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { onOpenInfo("age") }.padding(vertical = 15.dp))
+                    }
                 }
             }
         }
@@ -694,9 +709,13 @@ fun SettingsScreen(
                     // Only asked for because this phone won't hand over the date. Without
                     // one the wear model drops its age/heat term and charging looks
                     // responsible for the entire loss.
-                    Text(if (analysis?.ageIsUserSet == true) "Change battery age" else "Set battery age",
-                        color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable { showAgeDialog = true }.padding(vertical = 15.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                        Text(if (analysis?.ageIsUserSet == true) "Change battery age" else "Set battery age",
+                            color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { showAgeDialog = true }.padding(vertical = 15.dp))
+                        Text("How it works", color = Cell.TextMuted, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                            modifier = Modifier.clickable { onOpenInfo("age") }.padding(vertical = 15.dp))
+                    }
                 }
                 // Padding after clickable, so the tap target reaches 48dp — this link is the
                 // only way to correct the number the whole health calculation rests on.

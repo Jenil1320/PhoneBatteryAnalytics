@@ -19,13 +19,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.widget.Toast
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -201,6 +205,120 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
 }
 
 /** A tappable row that opens an info sub-screen (used on the Diagnose screen). */
+/** One numbered step, so the instructions read as a sequence rather than a wall of prose. */
+@Composable
+private fun Step(n: Int, title: String, body: String) {
+    Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            Modifier.size(24.dp).clip(CircleShape).background(Cell.AccentSoft),
+            contentAlignment = Alignment.Center,
+        ) { Text("$n", color = Cell.Accent, fontFamily = Mono, fontSize = 12.sp, fontWeight = FontWeight.Medium) }
+        Column {
+            Text(title, color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp)
+            Text(body, color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+/** A copyable command block — an ADB line is useless if it can't be copied accurately. */
+@Composable
+private fun CommandBlock(command: String) {
+    val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
+    Column(
+        Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(10.dp))
+            .background(Cell.TileCharcoal).padding(14.dp),
+    ) {
+        Text(command, color = Cell.OnTile, fontFamily = Mono, fontSize = 12.sp, lineHeight = 18.sp)
+        Text("Copy", color = Cell.AccentLight, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clickable {
+                    clipboard.setText(AnnotatedString(command))
+                    Toast.makeText(ctx, "Command copied", Toast.LENGTH_SHORT).show()
+                }
+                .padding(top = 10.dp, bottom = 4.dp))
+    }
+}
+
+/**
+ * How to give Cellspan the battery's age. Android hides the manufacture date from ordinary
+ * apps, so this is the one number the app may have to ask for — and without it the wear
+ * model has to drop its age-and-heat term entirely. Two routes, easy one first.
+ */
+@Composable
+fun BatteryAgeInfoScreen(onBack: () -> Unit, onSetDate: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp),
+    ) {
+        InfoHeader("Battery age", onBack)
+        Text(
+            "A battery wears in two ways: from charging, and from simply getting older and hot. " +
+                "To separate the two, Cellspan needs to know how old the cell is. Android does not let " +
+                "ordinary apps read the date it was made, so there are two ways to supply it.",
+            color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 21.sp,
+            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
+        )
+
+        SurfaceCard {
+            Column {
+                SectionLabel("Option 1 · tell Cellspan", color = Cell.Accent)
+                Text("Roughly when you got the phone is enough. Being a month out changes the answer by well under one percent.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                    modifier = Modifier.padding(top = 8.dp))
+                Text("Set the date now", color = Cell.Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { onSetDate() }.padding(vertical = 15.dp))
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        SurfaceCard {
+            Column {
+                SectionLabel("Option 2 · read it from the battery")
+                Text(
+                    "The exact date is stored in the battery itself. One command from a computer unlocks it, " +
+                        "and Cellspan then fills the date in on its own. This needs no root and does not " +
+                        "modify your phone — it only grants Cellspan permission to read a value it is " +
+                        "otherwise blocked from seeing. It lasts until you uninstall the app.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Step(1, "Install ADB on a computer",
+                    "ADB is part of Google's free Android Platform Tools. Search for “Android Platform Tools”, download it and unzip it.")
+                Step(2, "Turn on USB debugging",
+                    "On the phone open Settings, then About phone, and tap “Build number” seven times. Go back, open Developer options, and switch on USB debugging.")
+                Step(3, "Connect the phone and run this",
+                    "Plug the phone into the computer, accept the “Allow USB debugging?” prompt, then run:")
+                CommandBlock("adb shell pm grant io.github.jenil1320.cellspan android.permission.BATTERY_STATS")
+                Step(4, "Reopen Cellspan",
+                    "The battery age appears by itself, marked “from battery”, and the age-and-heat share is calculated from the real date.")
+                Text(
+                    "You can switch USB debugging back off afterwards; the permission stays. " +
+                        "If the command prints nothing, it worked — ADB is quiet on success.",
+                    color = Cell.TextFaint, fontSize = 11.5.sp, lineHeight = 17.sp,
+                    modifier = Modifier.padding(top = 14.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        SurfaceCard {
+            Column {
+                SectionLabel("If you skip both")
+                Text(
+                    "Cellspan still measures your State of Health and still shows the wear from charging. " +
+                        "The only thing missing is the split between charging and age, because that share " +
+                        "cannot be worked out without a date. Nothing else is affected.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(32.dp))
+    }
+}
+
 @Composable
 fun NavRow(label: String, sub: String, onClick: () -> Unit, metric: Metric? = null) {
     Row(
