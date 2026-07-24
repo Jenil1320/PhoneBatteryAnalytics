@@ -14,7 +14,7 @@ enum class Condition(val severity: Int, val label: String) {
  * The result of turning a [BatterySnapshot] into human-meaningful health numbers.
  * All values may be null when the underlying data isn't available on the device.
  */
-enum class CapacitySource { GAUGE, SESSION, ESTIMATE, NONE }
+enum class CapacitySource { DEVICE, GAUGE, SESSION, ESTIMATE, NONE }
 
 data class Analysis(
     val sohPct: Double?,
@@ -129,11 +129,18 @@ object BatteryAnalytics {
 
         // Current full-charge capacity, best source first:
         // exact gauge value → session-measured average → instantaneous estimate.
+        // The platform's own State of Health outranks everything: it is the
+        // manufacturer's figure, not one we derived.
+        val deviceSoh = s.stateOfHealthPct?.takeIf { it in 1..100 }?.toDouble()
         val currentFromSysfs = s.chargeFullUah?.let { (it / 1000.0).toInt() }
         val currentEstimate = estimateFullCapacityMah(s.chargeCounterUah, s.levelPct)
         val currentMah: Int?
         val source: CapacitySource
         when {
+            deviceSoh != null -> {
+                currentMah = designMah?.let { (it * deviceSoh / 100.0).toInt() }
+                source = CapacitySource.DEVICE
+            }
             currentFromSysfs != null -> { currentMah = currentFromSysfs; source = CapacitySource.GAUGE }
             sessionMeasuredMah != null -> { currentMah = sessionMeasuredMah; source = CapacitySource.SESSION }
             currentEstimate != null -> { currentMah = currentEstimate; source = CapacitySource.ESTIMATE }
@@ -141,7 +148,7 @@ object BatteryAnalytics {
         }
 
         val sohIsEstimated = source == CapacitySource.ESTIMATE
-        val soh: Double? =
+        val soh: Double? = deviceSoh ?:
             if (currentMah != null && designMah != null && designMah > 0) {
                 val raw = currentMah.toDouble() / designMah * 100.0
                 // A fresh cell can read slightly over its rated design capacity, and

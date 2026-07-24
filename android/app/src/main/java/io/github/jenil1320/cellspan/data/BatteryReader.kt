@@ -73,6 +73,8 @@ object BatteryReader {
         val chargeFullDesign = readLongNode("charge_full_design")?.takeIf { it in 1_000_000L..20_000_000L }
         // Manufacture date, best source first: the platform property, then the raw node.
         val mfg = readManufacturingDate(bm) ?: readLongNode("manufacturing_date")?.takeIf { it > 0 }
+        // The manufacturer's own health figure, when the device publishes one.
+        val soh = readStateOfHealth(bm)
 
         return BatterySnapshot(
             timestampMs = System.currentTimeMillis(),
@@ -92,6 +94,7 @@ object BatteryReader {
             chargeFullUah = chargeFull,
             chargeFullDesignUah = chargeFullDesign,
             manufacturingEpoch = mfg,
+            stateOfHealthPct = soh,
             sysfsAvailable = chargeFull != null && chargeFullDesign != null,
         )
     }
@@ -153,8 +156,35 @@ object BatteryReader {
         return seconds.takeIf { it in 1_100_000_000L..nowSec }
     }
 
-    /** Hidden BatteryManager property id; the constant itself is @hide, the value is not. */
+    /**
+     * The platform's own State of Health, 0–100, or null when this device won't report it.
+     *
+     * Unlike the manufacturing-date property, `BATTERY_PROPERTY_STATE_OF_HEALTH` (10) is
+     * gated on a feature flag rather than a permission — where the flag is on, the check
+     * short-circuits before BatteryManager consults BATTERY_STATS, so an ordinary app can
+     * read it. Plenty of devices simply don't implement it, hence the guard: this is an
+     * opportunistic upgrade over our own estimate, never something the app depends on.
+     */
+    private fun readStateOfHealth(bm: BatteryManager): Int? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return null
+        val raw = try {
+            bm.getIntProperty(BATTERY_PROPERTY_STATE_OF_HEALTH)
+        } catch (e: Throwable) {
+            return null
+        }
+        // Int.MIN_VALUE is the "unsupported" sentinel and 0 means unimplemented rather
+        // than a dead cell — but the more common lie is a flat 100. Android does not
+        // require a device to populate this, and several (the Pixel 7 among them) return
+        // a hard-coded 100 while their own health_status reads "not computed". We cannot
+        // tell that stub apart from a genuinely new battery, and it costs nothing to
+        // ignore it: a truly new cell measures ~100 by our own method anyway. So only a
+        // value that actually reports wear is believed.
+        return raw.takeIf { it in 40..99 }
+    }
+
+    /** Hidden BatteryManager property ids; the constants are @hide, the values are not. */
     private const val BATTERY_PROPERTY_MANUFACTURING_DATE = 7
+    private const val BATTERY_PROPERTY_STATE_OF_HEALTH = 10
 
     private fun readLongNode(name: String): Long? = try {
         val f = File("$PSY/$name")

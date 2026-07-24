@@ -30,4 +30,10 @@ data class BatterySnapshot(
     val chargeFullDesignUah: Long? = null,
     val manufacturingEpoch: Long? = null,
     val sysfsAvailable: Boolean = false,
+    /**
+     * State of Health as the platform itself reports it, 0–100, or null. This is the
+     * manufacturer's own figure rather than anything Cellspan derives, so when it is
+     * present it outranks every other capacity source.
+     */
+    val stateOfHealthPct: Int? = null,
 )

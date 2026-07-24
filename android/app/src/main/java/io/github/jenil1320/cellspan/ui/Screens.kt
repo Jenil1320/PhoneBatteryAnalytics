@@ -448,6 +448,7 @@ fun HealthScreen(snapshot: BatterySnapshot?, analysis: Analysis?, history: List<
                     Spacer(Modifier.height(14.dp))
                     val measured = analysis.sohPct
                     val srcSub = when (analysis.capacitySource) {
+                        CapacitySource.DEVICE -> "reported by phone"
                         CapacitySource.GAUGE -> "fuel gauge"
                         CapacitySource.SESSION -> "${analysis.sessionCount} sessions"
                         CapacitySource.ESTIMATE -> "estimate"
