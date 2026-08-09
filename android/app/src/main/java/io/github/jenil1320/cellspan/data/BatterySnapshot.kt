@@ -16,6 +16,13 @@ data class BatterySnapshot(
     // Public battery info
     val levelPct: Int,
     val status: String,
+    /**
+     * Whether a charger is physically attached. Distinct from [status], and the one to
+     * test when reacting to a plug or unplug: the plugged flag flips with the power
+     * broadcast, while status can still read "Charging" for a moment afterwards, and can
+     * read "Not charging" on a plugged phone the platform has decided to hold.
+     */
+    val pluggedIn: Boolean,
     val health: String,
     val technology: String?,
     val temperatureC: Float?,

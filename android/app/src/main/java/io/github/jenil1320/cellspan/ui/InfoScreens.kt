@@ -194,7 +194,7 @@ fun PrivacyPolicyScreen(onBack: () -> Unit) {
 
         Para("Permissions",
             "Wi-Fi state: to show whether Wi-Fi is on, as a drain hint. " +
-                "Notifications: optional, only for the charge alarm. On Android 13 and later the app asks for it when you set the alarm. " +
+                "Notifications: optional, only for the battery life saver reminders. On Android 13 and later the app asks for it when you set a reminder. " +
                 "Usage access: optional, only for the app screen-time estimate. " +
                 "Cellspan asks for no location, contacts, camera, microphone, storage, or internet.")
 

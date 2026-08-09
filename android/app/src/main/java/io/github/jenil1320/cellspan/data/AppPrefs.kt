@@ -4,14 +4,15 @@ import android.content.Context
 
 /**
  * Small user-settings store: the onboarding flag, an optional design-capacity
- * override, and the charge-alarm target. Shares the same private prefs file as
- * the other on-device trackers.
+ * override, and the two battery life saver levels. Shares the same private prefs
+ * file as the other on-device trackers.
  */
 object AppPrefs {
     private const val PREFS = "cellspan_prefs"
     private const val ONBOARDED = "onboarded"
     private const val DESIGN_OVERRIDE = "design_override_mah"   // 0 / absent = none
     private const val ALARM_TARGET = "charge_alarm_target"      // 0 = off
+    private const val LOW_ALERT = "low_battery_alert"           // 0 = off
     private const val BG_SAMPLING = "background_sampling"       // hourly sample, user-controlled
     private const val BATTERY_START = "battery_start_ms"        // 0 / absent = unknown
 
@@ -32,6 +33,14 @@ object AppPrefs {
     fun chargeAlarmTarget(c: Context): Int = p(c).getInt(ALARM_TARGET, 0)
     fun setChargeAlarmTarget(c: Context, pct: Int) =
         p(c).edit().putInt(ALARM_TARGET, if (pct <= 0) 0 else pct.coerceIn(1, 100)).apply()
+
+    /**
+     * Low-battery reminder level, 1..50, or 0 when it is off. Bounded well below the
+     * unplug target so the two ends of the life-saver band can never cross.
+     */
+    fun lowBatteryAlert(c: Context): Int = p(c).getInt(LOW_ALERT, 0)
+    fun setLowBatteryAlert(c: Context, pct: Int) =
+        p(c).edit().putInt(LOW_ALERT, if (pct <= 0) 0 else pct.coerceIn(1, 50)).apply()
 
     /** Whether the hourly background sample may run. On by default; the user can stop it. */
     fun backgroundSampling(c: Context): Boolean = p(c).getBoolean(BG_SAMPLING, true)

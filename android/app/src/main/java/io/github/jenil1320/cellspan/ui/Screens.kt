@@ -52,6 +52,8 @@ import io.github.jenil1320.cellspan.analytics.SohForecaster
 import io.github.jenil1320.cellspan.data.AppPrefs
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.ChargeAlarm
+import io.github.jenil1320.cellspan.data.LowBatteryAlarm
+import io.github.jenil1320.cellspan.data.SystemChargeLimit
 import io.github.jenil1320.cellspan.data.HistoryPoint
 import io.github.jenil1320.cellspan.data.SocPoint
 import io.github.jenil1320.cellspan.ui.theme.Cell
@@ -718,7 +720,7 @@ fun SettingsScreen(
         Text("Settings", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
 
         Spacer(Modifier.height(16.dp))
-        ChargeAlarmCard(status)
+        BatteryLifeSaverCard(status)
 
         Spacer(Modifier.height(16.dp))
         BackgroundSamplingCard()
@@ -837,7 +839,7 @@ fun SettingsScreen(
             Column {
                 SectionLabel("Learn & privacy")
                 Spacer(Modifier.height(6.dp))
-                Text("As well as battery data, Cellspan reads whether Wi-Fi, Bluetooth, location services, battery saver and airplane mode are on or off, plus the screen brightness level — the on/off state only, never your position or any location data. Notifications are optional and are used only for the charge alarm.",
+                Text("As well as battery data, Cellspan reads whether Wi-Fi, Bluetooth, location services, battery saver and airplane mode are on or off, plus the screen brightness level — the on/off state only, never your position or any location data. Notifications are optional and are used only for the battery life saver reminders.",
                     color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
                 Spacer(Modifier.height(6.dp))
                 NavRow("Battery basics", "What the numbers mean, in plain words",
@@ -984,13 +986,21 @@ private fun BackgroundSamplingCard() {
     }
 }
 
-/** Charge-alarm control on the Now screen: pick a target level or turn it off. */
+/**
+ * Battery life saver: the two reminders that keep the cell inside its gentle band — plug
+ * in near the bottom, unplug near the top. Both are off until the user picks a level.
+ *
+ * The card is careful about one thing. Neither reminder caps the charge, because no
+ * Android API lets an app do that (see [SystemChargeLimit]); they notify, and the phone's
+ * own setting is offered below for the user who wants a real cap.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChargeAlarmCard(status: String) {
+private fun BatteryLifeSaverCard(status: String) {
     val ctx = LocalContext.current
-    var target by remember { mutableStateOf(AppPrefs.chargeAlarmTarget(ctx)) }
-    // A blocked notification makes the alarm silently useless, so the card has to say so.
+    var lowLevel by remember { mutableIntStateOf(AppPrefs.lowBatteryAlert(ctx)) }
+    var target by remember { mutableIntStateOf(AppPrefs.chargeAlarmTarget(ctx)) }
+    // A blocked notification makes both reminders silently useless, so the card says so.
     var notifsOn by remember { mutableStateOf(NotificationManagerCompat.from(ctx).areNotificationsEnabled()) }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
@@ -998,31 +1008,69 @@ private fun ChargeAlarmCard(status: String) {
     val notifSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
     }
-    fun apply(v: Int) {
+    val systemSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+    val charging = status == "Charging" || status == "Full"
+
+    fun applyLow(v: Int) {
+        lowLevel = v
+        AppPrefs.setLowBatteryAlert(ctx, v)
+        if (v > 0) {
+            if (Build.VERSION.SDK_INT >= 33) permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            // Only start the watch when the phone is actually on battery; plugging out
+            // later starts it from the power broadcast.
+            if (!charging) LowBatteryAlarm.scheduleCheck(ctx, 0)
+        } else {
+            LowBatteryAlarm.cancel(ctx)
+            LowBatteryAlarm.cancelNotification(ctx)
+        }
+        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+    }
+
+    fun applyHigh(v: Int) {
         target = v
         AppPrefs.setChargeAlarmTarget(ctx, v)
         if (v > 0) {
             if (Build.VERSION.SDK_INT >= 33) permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            if (status == "Charging" || status == "Full") ChargeAlarm.scheduleCheck(ctx, 0)
+            if (charging) ChargeAlarm.scheduleCheck(ctx, 0)
         } else {
             ChargeAlarm.cancel(ctx)
             ChargeAlarm.cancelNotification(ctx)
         }
         notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
     }
+
     SurfaceCard {
         Column {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("Charge alarm")
-                Text(if (target > 0) "at $target%" else "off",
-                    color = if (target > 0) Cell.Accent else Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
+                SectionLabel("Battery life saver")
+                Text(
+                    when {
+                        lowLevel > 0 && target > 0 -> "$lowLevel–$target%"
+                        lowLevel > 0 -> "from $lowLevel%"
+                        target > 0 -> "to $target%"
+                        else -> "off"
+                    },
+                    color = if (lowLevel > 0 || target > 0) Cell.Accent else Cell.TextFaint,
+                    fontFamily = Mono, fontSize = 11.sp,
+                )
             }
             Spacer(Modifier.height(6.dp))
-            Text("A reminder to unplug at a set level, so the battery spends less time full. Android gives apps no way to stop charging, so this notifies you — it does not cap the charge itself.",
+            Text("A lithium cell wears slowest in the middle of its range. Cellspan can remind you at both ends — plug in near the bottom, unplug near the top.",
                 color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp)
-            if (target > 0 && !notifsOn) {
-                Spacer(Modifier.height(8.dp))
-                Text("Notifications are switched off for Cellspan, so this alarm cannot reach you.",
+
+            Spacer(Modifier.height(14.dp))
+            Text("Remind me to charge at", color = Cell.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(8.dp))
+            LevelChips(listOf(0, 15, 20, 25, 30), lowLevel, ::applyLow)
+
+            Spacer(Modifier.height(16.dp))
+            Text("Remind me to unplug at", color = Cell.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(8.dp))
+            LevelChips(listOf(0, 80, 85, 90, 95), target, ::applyHigh)
+
+            if ((lowLevel > 0 || target > 0) && !notifsOn) {
+                Spacer(Modifier.height(12.dp))
+                Text("Notifications are switched off for Cellspan, so these reminders cannot reach you.",
                     color = Cell.Bad, fontSize = 12.5.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
                 Text("Turn on notifications", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier
@@ -1036,26 +1084,50 @@ private fun ChargeAlarmCard(status: String) {
                         }
                         .padding(vertical = 15.dp))
             }
-            Spacer(Modifier.height(10.dp))
-            // Flow, not a Row: at large font scales the last chip would otherwise be
-            // squeezed to one character per line and become unpickable.
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                listOf(0, 80, 85, 90, 95).forEach { v ->
-                    val sel = v == target
-                    Box(
-                        Modifier.clip(RoundedCornerShape(8.dp))
-                            .background(if (sel) Cell.AccentSoft else Cell.SurfaceHi)
-                            .border(1.dp, if (sel) Cell.BorderAccent else Cell.Border, RoundedCornerShape(8.dp))
-                            .clickable { apply(v) }
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                    ) {
-                        Text(if (v == 0) "Off" else "$v%", color = if (sel) Cell.Accent else Cell.TextMuted,
-                            fontSize = 12.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal)
+
+            // The honest footnote, and the one control that really does cap a charge.
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Each reminder stays on screen and repeats until you act on it, so it works on any phone. It cannot cut the power itself: Android gives no app that ability, and the kernel switch that does it is closed to apps. Many phones can cap the charge themselves — look for a charging limit or charging optimisation in the system battery settings, and turning that on makes the top of the band automatic.",
+                color = Cell.TextFaint, fontSize = 11.5.sp, lineHeight = 17.sp,
+            )
+            Text("Open battery settings", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable {
+                        try {
+                            systemSettings.launch(SystemChargeLimit.settingsIntent())
+                        } catch (e: Exception) {
+                            Toast.makeText(ctx, "Open Settings > Battery", Toast.LENGTH_LONG).show()
+                        }
                     }
-                }
+                    // Padding after clickable, so the tap target reaches 48dp.
+                    .padding(vertical = 15.dp))
+        }
+    }
+}
+
+/**
+ * A row of level choices, with 0 shown as "Off". Flow, not a Row: at large font scales the
+ * last chip would otherwise be squeezed to one character per line and become unpickable.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LevelChips(options: List<Int>, selected: Int, onPick: (Int) -> Unit) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        options.forEach { v ->
+            val sel = v == selected
+            Box(
+                Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(if (sel) Cell.AccentSoft else Cell.SurfaceHi)
+                    .border(1.dp, if (sel) Cell.BorderAccent else Cell.Border, RoundedCornerShape(8.dp))
+                    .clickable { onPick(v) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(if (v == 0) "Off" else "$v%", color = if (sel) Cell.Accent else Cell.TextMuted,
+                    fontSize = 12.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal)
             }
         }
     }

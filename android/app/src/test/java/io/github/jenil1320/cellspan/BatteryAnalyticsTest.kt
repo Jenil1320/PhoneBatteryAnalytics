@@ -26,7 +26,7 @@ class BatteryAnalyticsTest {
         model: String = "Pixel 7",
     ) = BatterySnapshot(
         timestampMs = nowMs, manufacturer = "Google", model = model, device = "panther",
-        levelPct = level, status = "Discharging", health = "Good", technology = "Li-ion",
+        levelPct = level, status = "Discharging", pluggedIn = false, health = "Good", technology = "Li-ion",
         temperatureC = 30f, voltageV = 4.0f, currentUa = -400000, chargeCounterUah = chargeCounter,
         cycleCount = cycles, chargeFullUah = chargeFull, chargeFullDesignUah = chargeFullDesign,
         manufacturingEpoch = mfg,

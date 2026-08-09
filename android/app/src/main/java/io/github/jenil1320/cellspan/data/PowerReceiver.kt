@@ -18,11 +18,31 @@ class PowerReceiver : BroadcastReceiver() {
         val app = context.applicationContext
         val pending = goAsync()
         Thread {
+            val nowCharging = action == Intent.ACTION_POWER_CONNECTED
+
+            // Battery life saver first, and in its own try: exactly one of the two loops
+            // runs at a time, and the one that stops also clears its notification. This
+            // used to sit below the history writes, inside their try — so a database
+            // hiccup swallowed it and left a "plug in" banner pinned to a charging phone.
+            // Nothing here needs the database, so nothing here waits on it.
+            try {
+                if (nowCharging) {
+                    LowBatteryAlarm.cancel(app)
+                    LowBatteryAlarm.cancelNotification(app)
+                    if (AppPrefs.chargeAlarmTarget(app) > 0) ChargeAlarm.scheduleCheck(app, 0)
+                } else {
+                    ChargeAlarm.cancel(app)
+                    ChargeAlarm.cancelNotification(app)
+                    if (AppPrefs.lowBatteryAlert(app) > 0) LowBatteryAlarm.scheduleCheck(app, 0)
+                }
+            } catch (e: Exception) {
+                // best-effort; never crash on a broadcast
+            }
+
             try {
                 val snap = BatteryReader.read(app)
                 val cc = snap.chargeCounterUah          // may be null on some devices
                 val nowTs = snap.timestampMs
-                val nowCharging = action == Intent.ACTION_POWER_CONNECTED
 
                 // Close the current charge/discharge segment into a History session, then
                 // open the opposite one. Works even without the fuel-gauge charge counter
@@ -34,15 +54,6 @@ class PowerReceiver : BroadcastReceiver() {
                     }
                 }
                 SegmentTracker.begin(app, nowTs, snap.levelPct, cc, nowCharging)
-
-                // Charge alarm: start the polling loop on plug-in (if a target is set),
-                // stop it and clear any notification on unplug.
-                if (nowCharging) {
-                    if (AppPrefs.chargeAlarmTarget(app) > 0) ChargeAlarm.scheduleCheck(app, 0)
-                } else {
-                    ChargeAlarm.cancel(app)
-                    ChargeAlarm.cancelNotification(app)
-                }
 
                 // Session-based capacity measurement (needs the fuel-gauge charge counter).
                 if (cc != null) when (action) {

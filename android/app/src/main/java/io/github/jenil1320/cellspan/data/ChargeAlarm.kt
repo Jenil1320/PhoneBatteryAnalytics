@@ -13,6 +13,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import io.github.jenil1320.cellspan.MainActivity
 import io.github.jenil1320.cellspan.R
 import java.util.concurrent.TimeUnit
@@ -31,9 +32,25 @@ object ChargeAlarm {
     private const val NOTIF_ID = 4201
     private const val CHECK_MINUTES = 3L
 
+    /** Input key carrying how many reminders have already been sent this charge. */
+    const val KEY_REMINDERS = "reminders_sent"
+
+    /** Gap between repeat reminders once the target is passed. */
+    const val REMIND_MINUTES = 5L
+
+    /**
+     * How many times to repeat before going quiet. No app can stop a charge, so the only
+     * lever left is to keep asking; 8 reminders covers the ~40 minutes a phone takes to
+     * go from 80% to full. After that the notification stays up but stops making noise,
+     * because a reminder that never ends is one the user turns off for good.
+     */
+    const val MAX_REMINDERS = 8
+
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Charge alarm", NotificationManager.IMPORTANCE_HIGH).apply {
+            // The channel ID stays as it was, so an upgrading user keeps whatever sound and
+            // importance they had set; only the label follows the new feature name.
+            val ch = NotificationChannel(CHANNEL_ID, "Unplug reminder", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Reminds you to unplug when the battery reaches your target level."
             }
             context.getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
@@ -41,9 +58,10 @@ object ChargeAlarm {
     }
 
     /** Start (or restart) the polling loop — call when plugged in with a target set. */
-    fun scheduleCheck(context: Context, delayMinutes: Long = 0L) {
+    fun scheduleCheck(context: Context, delayMinutes: Long = 0L, remindersSent: Int = 0) {
         val req = OneTimeWorkRequestBuilder<ChargeAlarmWorker>()
             .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
+            .setInputData(workDataOf(KEY_REMINDERS to remindersSent))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, req)
     }
@@ -55,7 +73,13 @@ object ChargeAlarm {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
     }
 
-    fun notifyReached(context: Context, level: Int, target: Int) {
+    /**
+     * @param ongoing keeps the notification pinned so it cannot be swiped away and lost.
+     *        The final reminder is posted dismissible instead: once the loop stops there
+     *        is nothing left to clear a pinned one if the unplug broadcast is ever missed,
+     *        and a notification the user cannot remove is worse than one they can.
+     */
+    fun notifyReached(context: Context, level: Int, target: Int, ongoing: Boolean = true) {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val pi = PendingIntent.getActivity(
@@ -67,7 +91,12 @@ object ChargeAlarm {
             .setContentTitle("Battery at $level%")
             .setContentText("Reached your $target% target — unplug to reduce battery wear.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            // The notification IS the charge cap here, so while the loop is still alive it
+            // stays put rather than being swiped away and forgotten. Both the loop and
+            // PowerReceiver clear it once the cable comes out.
+            .setOngoing(ongoing)
+            .setAutoCancel(false)
+            .setOnlyAlertOnce(false)
             .setContentIntent(pi)
             .build()
         try {
@@ -82,18 +111,34 @@ object ChargeAlarm {
     }
 }
 
-/** One tick of the charge-alarm loop. Reschedules itself until the target is hit or the phone is unplugged. */
+/**
+ * One tick of the charge-alarm loop. Runs until the phone is unplugged, first watching for
+ * the target and then repeating the reminder while the phone stays above it.
+ */
 class ChargeAlarmWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
         val ctx = applicationContext
         val target = AppPrefs.chargeAlarmTarget(ctx)
         if (target <= 0) return Result.success()                  // alarm turned off
         val snap = BatteryReader.read(ctx)
-        val charging = snap.status == "Charging" || snap.status == "Full"
-        if (!charging) return Result.success()                    // unplugged: stop the loop
+        // Plugged, not status: a phone held at a cap reports "Not charging" while still on
+        // the cable, and stopping the loop there would drop the reminder exactly when the
+        // user most wants it.
+        if (!snap.pluggedIn) {
+            // The loop clears its own notification rather than trusting the unplug
+            // broadcast to do it. That broadcast is missed if the app is force-stopped
+            // mid-charge, which would otherwise pin a stale "unplug" banner indefinitely.
+            ChargeAlarm.cancelNotification(ctx)
+            return Result.success()                               // unplugged: stop the loop
+        }
         if (snap.levelPct >= target) {
-            ChargeAlarm.notifyReached(ctx, snap.levelPct, target)
-            return Result.success()                               // reached: stop until next plug-in
+            val sent = inputData.getInt(ChargeAlarm.KEY_REMINDERS, 0)
+            val last = sent + 1 >= ChargeAlarm.MAX_REMINDERS
+            ChargeAlarm.notifyReached(ctx, snap.levelPct, target, ongoing = !last)
+            // Keep asking while the cable is still in. This is the whole enforcement
+            // mechanism — the reminder repeats instead of firing once and being missed.
+            if (!last) ChargeAlarm.scheduleCheck(ctx, ChargeAlarm.REMIND_MINUTES, sent + 1)
+            return Result.success()
         }
         ChargeAlarm.scheduleNext(ctx)                             // not there yet: check again soon
         return Result.success()

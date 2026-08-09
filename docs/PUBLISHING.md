@@ -48,7 +48,7 @@ Bundle); the APK is only for handing to testers directly.
 ## Notes
 
 - The app requests one runtime permission, `POST_NOTIFICATIONS`, and only for the
-  optional charge alarm. Everything else is public battery APIs plus the
+  optional battery life saver reminders. Everything else is public battery APIs plus the
   user-granted Usage Access, which keeps the review straightforward.
 - Check that the app name **Cellspan** isn't already taken on Play before
   committing to branding; the package id `io.github.jenil1320.cellspan` is yours

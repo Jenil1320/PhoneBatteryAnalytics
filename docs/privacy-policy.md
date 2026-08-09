@@ -62,7 +62,7 @@ Uninstalling Cellspan permanently deletes all of its stored data from your devic
 | Permission | Why | Type |
 |---|---|---|
 | `ACCESS_WIFI_STATE` | Show whether Wi-Fi is on, as a drain indicator | Normal (auto-granted) |
-| `POST_NOTIFICATIONS` | Optional. Used only to post the charge alarm you set | Runtime, asked for on Android 13 and later |
+| `POST_NOTIFICATIONS` | Optional. Used only to post the battery life saver reminders you set | Runtime, asked for on Android 13 and later |
 | `PACKAGE_USAGE_STATS` (Usage Access) | Optional per-app screen-time estimate | Special, user-granted |
 
 Cellspan requests **no location, no contacts, no camera, no microphone, no

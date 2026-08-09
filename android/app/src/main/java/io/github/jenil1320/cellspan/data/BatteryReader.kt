@@ -37,6 +37,9 @@ object BatteryReader {
         }
 
         val statusStr = statusToString(sticky?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1)
+        // Non-zero means some charger (AC, USB, wireless, dock) is attached. Kept separate
+        // from the status string, which lags a plug/unplug by a moment.
+        val plugged = (sticky?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
         val healthStr = healthToString(sticky?.getIntExtra(BatteryManager.EXTRA_HEALTH, -1) ?: -1)
         val tech = sticky?.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY)?.ifBlank { null }
         val tempC = sticky?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
@@ -89,6 +92,7 @@ object BatteryReader {
             device = Build.DEVICE ?: "",
             levelPct = level.coerceIn(0, 100),
             status = statusStr,
+            pluggedIn = plugged,
             health = healthStr,
             technology = tech,
             temperatureC = tempC,
