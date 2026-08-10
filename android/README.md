@@ -31,6 +31,15 @@ unrooted Android those nodes are blocked by SELinux and the app falls back clean
 SQLite database, so the Trends screen fills in over the following weeks. Nothing
 leaves the device.
 
+**Battery life saver.** A plug-in reminder at the bottom of the charge band and a
+charge limit at the top. On a rooted phone the limit genuinely stops the charge:
+[`ChargeControl`](app/src/main/java/io/github/jenil1320/cellspan/data/ChargeControl.kt)
+finds the kernel's charging switch (Pixel `charge_stop_level`, or a
+`charging_enabled`-style boolean) and the alarm loop drives it, releasing it on
+unplug so the phone can never be left refusing to charge. Without root no app can
+cut the power, so the limit falls back to a pinned, repeating unplug reminder and
+links the phone's own charging-limit setting.
+
 ## Screens
 
 - **Health** — the headline SoH number, a condition pill, the capacity trend, key

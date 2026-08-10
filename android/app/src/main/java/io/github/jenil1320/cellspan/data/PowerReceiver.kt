@@ -33,6 +33,9 @@ class PowerReceiver : BroadcastReceiver() {
                 } else {
                     ChargeAlarm.cancel(app)
                     ChargeAlarm.cancelNotification(app)
+                    // Off the cable, the root cap must never stay engaged — a phone that
+                    // silently refuses to charge is the one failure this feature cannot have.
+                    ChargeControl.releaseIfEngaged(app)
                     if (AppPrefs.lowBatteryAlert(app) > 0) LowBatteryAlarm.scheduleCheck(app, 0)
                 }
             } catch (e: Exception) {
