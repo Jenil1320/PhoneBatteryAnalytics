@@ -90,8 +90,6 @@ fun HistoryScreen(sessions: List<Session>) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Text("History", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-        Text("Every charge and discharge as a session, what's draining now, and today's apps by screen time.",
-            color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp))
 
         // ── Sessions ─────────────────────────────────────────────────────────────
         Spacer(Modifier.height(18.dp))
@@ -99,7 +97,7 @@ fun HistoryScreen(sessions: List<Session>) {
         Spacer(Modifier.height(8.dp))
         if (sessions.isEmpty()) {
             SurfaceCard {
-                Text("Charge and unplug your phone a few times, and each charge and discharge shows up here — with its time span, how much it moved, and the wear it added.",
+                Text("Charge and unplug a few times — each session shows up here.",
                     color = Cell.TextMuted, fontSize = 13.sp, lineHeight = 19.sp)
             }
         } else {
@@ -137,9 +135,6 @@ fun HistoryScreen(sessions: List<Session>) {
                         } else {
                             val max = apps.maxOf { it.foregroundMs }.coerceAtLeast(1L)
                             apps.forEach { AppUsageBar(it.label, it.foregroundMs.toFloat() / max, Fmt.duration(it.foregroundMs), it.estMah) }
-                            Spacer(Modifier.height(8.dp))
-                            Text("Rough estimate: screen time × your device's screen power. Exact per-app mAh needs a system permission normal apps can't use.",
-                                color = Cell.TextFaint, fontSize = 11.sp, lineHeight = 16.sp)
                         }
                     }
                     false -> {
@@ -218,20 +213,23 @@ private fun DrainRow(d: DrainItem) {
     }
 }
 
+/**
+ * One app row: full-width name with the figures on the right, and the proportion bar
+ * underneath. A fixed name column truncated real app names to "Instagr…", which made
+ * the list unreadable — the name owns the row now and the bar never competes with it.
+ */
 @Composable
 private fun AppUsageBar(label: String, fraction: Float, time: String, estMah: Int?) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(label, color = Cell.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(84.dp))
-        Box(Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Track)) {
-            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(12.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Accent))
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = Cell.TextSecondary, fontSize = 13.sp, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 10.dp))
+            Text(listOfNotNull(estMah?.let { "~$it mAh" }, time).joinToString(" · "),
+                color = Cell.TextMuted, fontFamily = Mono, fontSize = 11.sp)
         }
-        Column(horizontalAlignment = Alignment.End, modifier = Modifier.width(64.dp)) {
-            Text(estMah?.let { "~$it mAh" } ?: time, color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp)
-            if (estMah != null) Text(time, color = Cell.TextFaint, fontFamily = Mono, fontSize = 9.sp)
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Track)) {
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(7.dp).clip(RoundedCornerShape(4.dp)).background(Cell.Accent))
         }
     }
 }

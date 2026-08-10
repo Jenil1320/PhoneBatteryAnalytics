@@ -110,10 +110,6 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp)) {
         Text("Trends", color = Cell.TextPrimary, fontFamily = Sans, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Temperature, voltage, current and charge cycles over time. Day is live; Week, Month and a custom range show one point per day.",
-            color = Cell.TextMuted, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 8.dp),
-        )
 
         Spacer(Modifier.height(16.dp))
         // Selecting a preset clears any custom range; while custom is active no preset is highlighted.
@@ -203,17 +199,12 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
                 xValueLabel = curr.xValueLabel,
                 emptyMsg = "Charge/discharge current over the last 24 hours — updates while the app is open.") {
                 MinNowMaxRow(curr.points.map { it.second }) { "${it.toInt()} mA" }
-                Spacer(Modifier.height(4.dp))
-                Text("Above the 0 mA line = charging, below = discharging.", color = Cell.TextFaint, fontSize = 11.sp)
             }
         } else {
             val cp = vitalPoints(window, { it.currAvg?.toFloat() })
             TrendCard("Current · daily avg", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
                 xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
-                emptyMsg = NO_DAILY_HISTORY) {
-                Text("Above the 0 mA line = net charging that day, below = net discharge.", color = Cell.TextFaint, fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 6.dp))
-            }
+                emptyMsg = NO_DAILY_HISTORY)
         }
 
         // ── Charge cycles ───────────────────────────────────────────────────────
@@ -236,9 +227,6 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         SurfaceCard {
             Column {
                 SectionLabel("Where your charge sits")
-                Spacer(Modifier.height(4.dp))
-                Text("Share of recent time at each charge level. The 20–80% middle is gentlest on the cell.",
-                    color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 17.sp)
                 Spacer(Modifier.height(12.dp))
                 val dist = BatteryAnalytics.levelDistribution(socLog.map { it.levelPct })
                 val total = dist.sum().coerceAtLeast(1)

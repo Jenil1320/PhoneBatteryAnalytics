@@ -255,9 +255,8 @@ fun BatteryAgeInfoScreen(onBack: () -> Unit, onSetDate: () -> Unit) {
     ) {
         InfoHeader("Battery age", onBack)
         Text(
-            "A battery wears in two ways: from charging, and from simply getting older and hot. " +
-                "To separate the two, Cellspan needs to know how old the cell is. Android does not let " +
-                "ordinary apps read the date it was made, so there are two ways to supply it.",
+            "The charging vs age split needs the battery's age. Android hides the " +
+                "manufacture date, so supply it one of two ways.",
             color = Cell.TextSecondary, fontSize = 14.sp, lineHeight = 21.sp,
             modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
         )
@@ -265,7 +264,7 @@ fun BatteryAgeInfoScreen(onBack: () -> Unit, onSetDate: () -> Unit) {
         SurfaceCard {
             Column {
                 SectionLabel("Option 1 · tell Cellspan", color = Cell.Accent)
-                Text("Roughly when you got the phone is enough. Being a month out changes the answer by well under one percent.",
+                Text("Roughly when you got the phone is enough — a month either way barely matters.",
                     color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
                     modifier = Modifier.padding(top = 8.dp))
                 Text("Set the date now", color = Cell.Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
@@ -278,41 +277,23 @@ fun BatteryAgeInfoScreen(onBack: () -> Unit, onSetDate: () -> Unit) {
             Column {
                 SectionLabel("Option 2 · read it from the battery")
                 Text(
-                    "The exact date is stored in the battery itself. One command from a computer unlocks it, " +
-                        "and Cellspan then fills the date in on its own. This needs no root and does not " +
-                        "modify your phone — it only grants Cellspan permission to read a value it is " +
-                        "otherwise blocked from seeing. It lasts until you uninstall the app.",
+                    "The battery stores its exact make date. One computer command lets Cellspan read it — no root, nothing modified.",
                     color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 Step(1, "Install ADB on a computer",
-                    "ADB is part of Google's free Android Platform Tools. Search for “Android Platform Tools”, download it and unzip it.")
+                    "Search for “Android Platform Tools”, download and unzip.")
                 Step(2, "Turn on USB debugging",
-                    "On the phone open Settings, then About phone, and tap “Build number” seven times. Go back, open Developer options, and switch on USB debugging.")
+                    "Settings › About phone › tap “Build number” seven times. Then Developer options › USB debugging.")
                 Step(3, "Connect the phone and run this",
-                    "Plug the phone into the computer, accept the “Allow USB debugging?” prompt, then run:")
+                    "Accept the “Allow USB debugging?” prompt, then run:")
                 CommandBlock("adb shell pm grant io.github.jenil1320.cellspan android.permission.BATTERY_STATS")
                 Step(4, "Reopen Cellspan",
-                    "The battery age appears by itself, marked “from battery”, and the age-and-heat share is calculated from the real date.")
+                    "The battery age appears by itself, marked “from battery”.")
                 Text(
-                    "You can switch USB debugging back off afterwards; the permission stays. " +
-                        "If the command prints nothing, it worked — ADB is quiet on success.",
+                    "USB debugging can go back off — the permission stays. No output means it worked.",
                     color = Cell.TextFaint, fontSize = 11.5.sp, lineHeight = 17.sp,
                     modifier = Modifier.padding(top = 14.dp),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        SurfaceCard {
-            Column {
-                SectionLabel("If you skip both")
-                Text(
-                    "Cellspan still measures your State of Health and still shows the wear from charging. " +
-                        "The only thing missing is the split between charging and age, because that share " +
-                        "cannot be worked out without a date. Nothing else is affected.",
-                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
-                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         }
