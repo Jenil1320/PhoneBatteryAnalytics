@@ -72,6 +72,20 @@ object Cell {
     var Bad by mutableStateOf(Color(0xFFB24A3A))    // warm red, harmonised with the browns
     var Cool by mutableStateOf(Color(0xFF5B8BA0))   // muted cool tone for temperature
 
+    /**
+     * The fill and label for a primary action button, kept SEPARATE from [Accent].
+     *
+     * Accent has to do one job in each theme and they conflict: on a dark background it
+     * must be light enough to read as text, which is exactly what makes it useless as a
+     * button fill — a pale green block with near-white text reads as a disabled surface,
+     * not as something to press. So the button gets its own pair, and the contrast is
+     * inverted per theme: a dark fill with light text in the light theme, a bright fill
+     * with near-black text in the dark one. Both land well clear of the accessibility
+     * contrast minimum.
+     */
+    var ActionBg by mutableStateOf(Color(0xFF3F6157))
+    var OnAction by mutableStateOf(Color(0xFFFFFFFF))
+
     var Track by mutableStateOf(Color(0xFFE3E8DF))  // chart / bar track
     // Dark well behind the water orb, so the light readout stays legible at any fill.
     var OrbBase by mutableStateOf(Color(0xFF2E3D38))
@@ -101,6 +115,9 @@ object Cell {
         TextPrimary = Color(0xFF2F3E46); TextSecondary = Color(0xFF4A5A56)
         TextMuted = Color(0xFF77857D); TextFaint = Color(0xFFA1ABA2)
         Good = Color(0xFF52796F); Warn = Color(0xFFA7754D); Bad = Color(0xFFB24A3A); Cool = Color(0xFF5B8BA0)
+        // A shade deeper than Accent, so a filled button reads as the most prominent
+        // thing on the screen rather than blending into the accented text around it.
+        ActionBg = Color(0xFF3F6157); OnAction = Color(0xFFFFFFFF)
         Track = Color(0xFFE3E8DF); OrbBase = Color(0xFF2E3D38)
         isDark = false
     }
@@ -125,6 +142,9 @@ object Cell {
         TextPrimary = Color(0xFFE7EEE8); TextSecondary = Color(0xFFB8C5BC)
         TextMuted = Color(0xFF8B9A90); TextFaint = Color(0xFF6A776F)
         Good = Color(0xFF8FC2A2); Warn = Color(0xFFD9A574); Bad = Color(0xFFE07E6A); Cool = Color(0xFF7FB3C8)
+        // Bright and saturated, with near-black text on it. The opposite polarity to the
+        // light theme, and the only combination that reads as a button on a dark screen.
+        ActionBg = Color(0xFF8FD9A3); OnAction = Color(0xFF0C2116)
         Track = Color(0xFF2A332E); OrbBase = Color(0xFF0E1512)
         isDark = true
     }

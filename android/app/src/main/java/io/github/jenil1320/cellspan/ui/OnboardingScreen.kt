@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -139,17 +140,36 @@ fun OnboardingScreen(onDone: () -> Unit) {
     }
 }
 
+/**
+ * A primary action button.
+ *
+ * Uses [Cell.ActionBg] and [Cell.OnAction] rather than the accent pair. The accent has to
+ * stay light on a dark background so it works as *text*, and a pale fill under near-white
+ * text is exactly what made "Get started" read as an inert panel instead of the one thing
+ * on the screen to press. The dedicated pair inverts contrast per theme, and the shadow
+ * plus the taller body give it the weight a call to action needs.
+ */
 @Composable
 private fun PillButton(label: String, filled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
         modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (filled) Cell.Accent else Cell.AccentSoft)
-            .then(if (filled) Modifier else Modifier.border(1.dp, Cell.BorderAccent, RoundedCornerShape(12.dp)))
+            .then(
+                if (filled) Modifier.shadow(6.dp, RoundedCornerShape(14.dp), spotColor = Cell.ActionBg)
+                else Modifier
+            )
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (filled) Cell.ActionBg else Cell.AccentSoft)
+            .then(if (filled) Modifier else Modifier.border(1.dp, Cell.BorderAccent, RoundedCornerShape(14.dp)))
             .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 13.dp),
+            .padding(horizontal = 26.dp, vertical = 17.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = if (filled) Cell.OnTile else Cell.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            label,
+            color = if (filled) Cell.OnAction else Cell.Accent,
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.2.sp,
+        )
     }
 }
