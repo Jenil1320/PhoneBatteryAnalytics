@@ -9,8 +9,20 @@
          with no Bluetooth radio. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
-    <!-- Only used for the optional charge alarm; requested at runtime on Android 13+. -->
+    <!-- Only used for the optional battery reminders; requested at runtime on Android 13+. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- The battery guard. ACTION_BATTERY_CHANGED is the only signal that reports every
+         single point of level change, and the platform refuses to deliver it to a
+         manifest-declared receiver — it must go to a running process. A foreground
+         service is that process, and it is the only way an unprivileged app can alert at
+         exactly 20% and exactly 80% rather than "somewhere past" them. It runs only while
+         the user has armed a reminder, does no polling, and holds no wake lock. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Brings the guard back after a reboot; WorkManager restores its own jobs but a
+         foreground service is not WorkManager's to restore. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Granted by the user via Settings > Usage access, not at runtime. -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
@@ -67,6 +79,28 @@
                 <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
             </intent-filter>
         </receiver>
+
+        <!-- Restarts the guard after a reboot or an app update. -->
+        <receiver
+            android:name=".data.BootReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Watches the battery so the reminders land on the exact level the user chose. -->
+        <service
+            android:name=".data.BatteryGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Continuously monitors the battery level so the user's own charge and discharge reminders fire at the exact percentage they set. No other foreground service type covers battery-level monitoring, and the underlying ACTION_BATTERY_CHANGED broadcast is only delivered to a running process." />
+        </service>
     </application>
 
 </manifest>

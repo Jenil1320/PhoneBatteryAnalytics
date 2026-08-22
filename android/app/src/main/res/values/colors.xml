@@ -1,5 +1,6 @@
 <resources>
-    <color name="bg">#FF0B0D0B</color>
+    <!-- Launch-window colours only; the running UI gets its palette from Theme.kt. -->
     <color name="windowBg">#FFF1F4EE</color>
+    <color name="windowBgDark">#FF171D1A</color>
     <color name="ic_launcher_background">#FF0B0D0B</color>
 </resources>

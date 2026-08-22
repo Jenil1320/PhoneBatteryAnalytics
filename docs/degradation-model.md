@@ -34,7 +34,7 @@ Cyclic:    Q_loss,cyc = β_cap · sqrt(Q_throughput_Ah)
 | `T` | temperature | **kelvin** (Arrhenius, used directly) |
 | `V` | mean cell voltage (calendar: mean rest/storage OCV; cyclic: mean voltage over a cycle) | volts |
 | `DoD` | depth of discharge, measured from sessions where possible | fraction 0–1 |
-| `Q_throughput_Ah` | charge throughput = equivalent full cycles × design capacity (Ah) | Ah |
+| `Q_throughput_Ah` | charge throughput, expressed against the fitted reference cell: equivalent full cycles × 2 × 2.05 Ah (see below) | Ah |
 | `Q_loss` | relative capacity loss | fraction (0.20 = 20 %) |
 
 Fixed constants (verbatim from SimSES source / Schmalstieg 2014): calendar time
@@ -43,10 +43,10 @@ vertex **3.667 V**, calendar activation energy ≈ 6976·R ≈ **58 kJ/mol**.
 
 ## What the cyclic term predicts (and why it is not anchored to an OEM rating)
 
-With the fixed phone cycle-mean voltage (3.7 V) and a 4355 mAh design capacity, the
-**cyclic term alone** predicts **21.4 % loss at 800 equivalent full cycles** using the old
-DoD of 0.7, and **16.6 %** using the current 0.5 default. No calendar term is added at
-that point unless a battery age is known.
+With the fixed phone cycle-mean voltage (3.7 V) and the current DoD default of 0.5, the
+**cyclic term alone** predicts **≈16.1 % loss at 800 equivalent full cycles** — for any
+phone, regardless of pack size (see the normalisation section below). No calendar term is
+added at that point unless a battery age is known.
 
 **This figure is not a match for any manufacturer rating, and must not be tuned into
 one.** An OEM number such as "80 % capacity after ~800 cycles" is a *whole-life field
@@ -82,22 +82,49 @@ cycles, not a calibration target.
   sessions — `HistoryStore.avgDischargeDoD`, depth-weighted, over a 90-day window, with a
   minimum of 5 sessions — and falls back to 0.5 only when there are too few sessions.
 
-## Scale caveat: β is not normalised to cell size
+## Throughput normalisation (corrected 2026-08-22)
 
-β_cap carries units of **Ah^-0.5** and was fitted to a single **2.05 Ah** cell.
-Throughput is fed in as raw Ah and is **not** normalised by cell size — SimSES does not
-normalise it either. Predicted fractional loss at a fixed cycle count therefore grows
-with the **square root of battery capacity**. At 800 equivalent full cycles and DoD 0.7:
+β_cap carries units of **Ah^-0.5** and was fitted to a single **2.05 Ah** cell, so the
+ampere-hour figure fed to it only means what the paper intended near that cell size.
 
-| Design capacity | Predicted cyclic loss |
+**The app used to pass the phone's own pack capacity.** Predicted fractional loss then
+grew with the square root of battery size — the same model claimed different wear for
+different phones at the same cycle count, purely because one had a bigger battery:
+
+| Design capacity | Predicted cyclic loss at 800 cycles (old, incorrect) |
 |---|---|
 | 3000 mAh | ≈ 17.8 % |
-| 4356 mAh | ≈ 21.4 % (the reference case above) |
+| 4356 mAh | ≈ 21.4 % |
 | 6000 mAh | ≈ 25.1 % |
 
-The absolute output is therefore only calibrated near the reference cell size. Relative
-comparisons (this cell against the model over time) survive the mismatch; absolute
-percentages on a much larger or smaller pack do not.
+That is not what a bigger battery does. Capacity fade is an **intensive** property: it is
+driven by how many times the cell's chemistry has been cycled, not by how many
+ampere-hours the pack holds. At equal cycle count a large pack and a small one have each
+been cycled the same number of times and should be modelled as equally worn.
+
+Throughput is therefore now expressed **against the reference cell**:
+
+```
+Q_throughput_Ah = equivalent_full_cycles × AH_PER_CYCLE × 2.05
+```
+
+Two constants there, both deliberate:
+
+- **2.05 Ah** — the Sanyo UR18650E the coefficients were fitted to.
+- **`AH_PER_CYCLE = 2.0`** — Schmalstieg counts an equivalent full cycle as throughput
+  ÷ (2 × capacity): the charge going in and the discharge coming out both count. Android's
+  `BATTERY_PROPERTY_CYCLE_COUNT` uses the ordinary consumer definition instead — one cycle
+  is one capacity's worth of *discharge*. Converting between the two is this factor of
+  two, and omitting it under-stated throughput by half.
+
+The result is capacity-independent, which is the physically correct behaviour, and it is
+pinned by a unit test (`cyclicWearDoesNotDependOnHowBigTheBatteryIs`). `designCapacityMah`
+is still a parameter of `cyclicLossFrac`, but only as a guard: a phone whose design
+capacity is unknown gets no cyclic term at all, because nothing else about it can be
+trusted either.
+
+The absolute output remains approximate for a modern phone cell — see the caveats below —
+but it no longer varies with something that should not affect it.
 
 ## Caveats (why it's labeled "typical", not a manufacturer figure)
 

@@ -1,10 +1,16 @@
 <resources>
+    <!--
+      The launch window, shown for the moment before Compose draws. It must match the app
+      or the user sees a flash of the wrong colour on every cold start. values-night
+      carries the dark version of the same three attributes.
+
+      windowLightStatusBar is true here because the light launch background needs dark
+      icons; MainActivity takes over both bars as soon as it composes.
+    -->
     <style name="Theme.Cellspan" parent="android:Theme.Material.NoActionBar">
-        <!-- The UI is light, so the launch window and status bar must be light too:
-             below API 35 the status-bar icons are dark and vanish on a near-black bar. -->
         <item name="android:windowBackground">@color/windowBg</item>
         <item name="android:statusBarColor">@color/windowBg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/windowBg</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

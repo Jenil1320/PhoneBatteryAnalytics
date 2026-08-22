@@ -24,20 +24,15 @@ import kotlin.math.sqrt
  * we present the output as "typical/modeled", never as a manufacturer figure.
  *
  * ## What the output is worth
- * At 800 equivalent full cycles on a 4355 mAh cell the cyclic term alone gives about
- * 21% loss. That figure is NOT a match for any manufacturer rating and must not be
- * treated as one: an OEM's "80% at 800 cycles" is a whole-life field number that
- * already contains years of calendar ageing, so anchoring the cyclic term to it and
+ * At 800 equivalent full cycles the cyclic term alone gives about 16% loss at the app's
+ * default depth of discharge. That figure is NOT a match for any manufacturer rating and
+ * must not be treated as one: an OEM's "80% at 800 cycles" is a whole-life field number
+ * that already contains years of calendar ageing, so anchoring the cyclic term to it and
  * then adding a calendar term on top would double-count.
  *
- * Two honest limits:
- *  - β carries units of Ah^-0.5 and was fitted to a single 2.05 Ah cell. Throughput is
- *    not normalised by cell size (SimSES does not either), so predicted fractional loss
- *    at a fixed cycle count grows with the square root of battery capacity: ~17.8% at
- *    3000 mAh, ~21.4% at 4356 mAh, ~25.1% at 6000 mAh. Absolute output is only
- *    calibrated near the reference cell size.
- *  - The coefficients come from a 2013 cell. Applied to a modern phone pouch cell they
- *    run pessimistic; the residual is real and is reported, not tuned away.
+ * The remaining honest limit: the coefficients come from a 2013 cell. Applied to a modern
+ * phone pouch cell they run pessimistic; the residual is real and is reported, not tuned
+ * away.
  */
 object DegradationModel {
 
@@ -96,17 +91,11 @@ object DegradationModel {
         val tempC = avgTempC ?: DEFAULT_TEMP_C
         val cyclic = cyclicLossFrac(equivalentFullCycles ?: 0.0, designCapacityMah, dod)
 
-        // Calendar capacity loss (per-unit): α_cap · days^0.75, only if age is known.
-        // Uses a fixed representative rest voltage (see note above) and the measured
-        // mean temperature — temperature is legitimate here, since calendar aging
-        // genuinely accrues at whatever temperature the cell sits at.
+        // Calendar capacity loss (per-unit), only if age is known.
         var calendar = 0.0
         var hasCalendar = false
         if (ageDays != null && ageDays > 0) {
-            val tK = tempC + 273.15
-            val v = DEFAULT_REST_V
-            val alpha = (7.543 * v - 23.75) * 1e6 * exp(-6976.0 / tK)
-            calendar = (alpha * ageDays.pow(0.75)).coerceAtLeast(0.0)
+            calendar = calendarLossFrac(ageDays, tempC)
             hasCalendar = true
         }
 
@@ -124,11 +113,64 @@ object DegradationModel {
     }
 
     /**
+     * Calendar capacity-loss fraction after [ageDays] at a mean [tempC]: α_cap · t^0.75,
+     * with α_cap linear in rest voltage and Arrhenius in temperature.
+     *
+     * Exposed rather than kept inside [estimate] because the SoH forecaster has to
+     * re-evaluate it at *future* ages. Holding the calendar term at today's value along a
+     * multi-year projection said a phone sitting in a drawer never ages, which is the
+     * opposite of what calendar aging means.
+     *
+     * Uses a fixed representative rest voltage (see the note on [estimate]) and the
+     * measured mean temperature — temperature is legitimate here, because calendar aging
+     * genuinely accrues at whatever temperature the cell actually sits at.
+     */
+    fun calendarLossFrac(ageDays: Double, tempC: Double?): Double {
+        if (ageDays <= 0.0) return 0.0
+        val tK = (tempC ?: DEFAULT_TEMP_C) + 273.15
+        val alpha = (7.543 * DEFAULT_REST_V - 23.75) * 1e6 * exp(-6976.0 / tK)
+        return (alpha * ageDays.pow(0.75)).coerceAtLeast(0.0)
+    }
+
+    /**
+     * Nominal capacity of the cell the model was fitted to: the Sanyo UR18650E, 2.05 Ah.
+     * Throughput is expressed against this cell, not against the phone's own pack — see
+     * [cyclicLossFrac] for why that matters.
+     */
+    private const val REFERENCE_CELL_AH = 2.05
+
+    /**
+     * Charge throughput per equivalent full cycle, as a multiple of cell capacity.
+     *
+     * Schmalstieg counts an equivalent full cycle as throughput ÷ (2 × capacity) — the
+     * charge going in and the discharge coming out both count. Android's
+     * `BATTERY_PROPERTY_CYCLE_COUNT` uses the ordinary consumer definition instead: one
+     * cycle is one capacity's worth of *discharge*. Converting between the two is this
+     * factor of two, and leaving it out silently under-stated throughput by half.
+     */
+    private const val AH_PER_CYCLE = 2.0
+
+    /**
      * Raw (unclamped) cyclic capacity-loss fraction: β_cap · sqrt(Ah throughput). This is
      * the ONLY transcription of the cyclic term — [estimate] calls it too, so the reported
      * figure and the forecaster's projection cannot drift apart. Monotone increasing in
      * cycles, so the SoH forecaster can bisect it to find the projected 80% crossing.
      *
+     * ## Why throughput is measured against the reference cell, not the phone's pack
+     * β_cap carries units of Ah^-0.5 and was fitted to one 2.05 Ah cell, so the Ah figure
+     * fed to it only means what the paper intended at roughly that cell size. Passing the
+     * phone's own pack capacity instead made predicted fractional loss grow with the
+     * square root of battery size: at 800 cycles the same model claimed ~17.8% loss on a
+     * 3000 mAh phone, ~21.4% on a 4355 mAh one and ~25.1% on a 6000 mAh one.
+     *
+     * That is not what a bigger battery does. Capacity fade is an intensive property — it
+     * is driven by how many times the cell's own chemistry has been cycled, not by how
+     * many ampere-hours the pack happens to hold — so at equal cycle count a large pack
+     * and a small one should be modelled as equally worn. Normalising throughput to
+     * [REFERENCE_CELL_AH] restores that and removes the spurious size dependence; the
+     * design capacity is now used only to confirm a pack is known, not to scale wear.
+     *
+     * ## Voltage
      * Schmalstieg's β_cap wants the MEAN cell voltage over a cycle (~3.7 V for a phone
      * spanning its charge range), whose parabola bottoms at 3.667 V. We deliberately use a
      * fixed representative cycle-mean rather than a measured average: the recent sample
@@ -136,12 +178,19 @@ object DegradationModel {
      * charging), which is a calendar-at-high-SoC condition, not the cycle mean — feeding
      * it here would wildly over-predict cyclic wear.
      */
-    fun cyclicLossFrac(equivalentFullCycles: Double, designCapacityMah: Int?, avgDoD: Double? = null): Double {
-        if (equivalentFullCycles <= 0.0 || designCapacityMah == null || designCapacityMah <= 0) return 0.0
+    fun cyclicLossFrac(equivalentFullCycles: Double, designCapacityMah: Int? = null, avgDoD: Double? = null): Double {
+        if (equivalentFullCycles <= 0.0) return 0.0
+        // designCapacityMah no longer enters the arithmetic — that is the whole point of
+        // the normalisation above — and it is no longer required either. Demanding it was
+        // a leftover from the old scaling, and it cost real users the entire "measured vs
+        // typical" card: a phone whose ROM hides its PowerProfile and is absent from the
+        // capacity table has a perfectly good cycle count and depth of discharge, which is
+        // all this formula now needs. The parameter is kept only so existing call sites
+        // read unchanged.
         val v = DEFAULT_CYCLE_V
         val dod = (avgDoD ?: DEFAULT_DOD).coerceIn(0.05, 1.0)
         val beta = 7.348e-3 * (v - 3.667).pow(2) + 7.6e-4 + 4.081e-3 * dod
-        val throughputAh = equivalentFullCycles * (designCapacityMah / 1000.0)
+        val throughputAh = equivalentFullCycles * AH_PER_CYCLE * REFERENCE_CELL_AH
         return beta * sqrt(throughputAh)
     }
 }

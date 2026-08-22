@@ -2,9 +2,14 @@
 
 package io.github.jenil1320.cellspan.ui.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.Font
@@ -14,57 +19,115 @@ import androidx.compose.ui.text.font.FontWeight
 import io.github.jenil1320.cellspan.R
 
 /**
- * Fresh light palette from palette.svg (Coolors): sage → teal → slate greens.
- * Light surfaces, white cards, and a row of saturated KPI tiles — the same
- * structure as the reference dashboard.
+ * The app palette, in both light and dark.
+ *
+ * Built from palette.svg (Coolors): sage → teal → slate greens.
  *
  *   #84a98c sage · #52796f teal · #354f52 slate · #2f3e46 charcoal
+ *
+ * ## Why the colours are mutable state rather than constants
+ * Every screen already reads them as `Cell.Accent`, `Cell.Bg` and so on — around a
+ * thousand call sites. Threading a theme object through all of that, or moving to a
+ * CompositionLocal, would mean touching every one of them for no behavioural gain.
+ * Backing each colour with Compose snapshot state instead means [CellspanTheme] swaps the
+ * whole palette in one place and every reader recomposes by itself, with not one call site
+ * changed. The trade-off is that the palette is process-global, which is correct here:
+ * there is exactly one theme, chosen by the system.
  */
 object Cell {
     // Surfaces
-    val Bg = Color(0xFFEAEEE6)          // page background (light sage-gray)
-    val BgTop = Color(0xFFF1F4EE)
-    val BgElevated = Color(0xFFFFFFFF)  // cards
-    val Surface = Color(0xFFFFFFFF)
-    val SurfaceHi = Color(0xFFF4F7F1)
+    var Bg by mutableStateOf(Color(0xFFEAEEE6))          // page background (light sage-gray)
+    var BgTop by mutableStateOf(Color(0xFFF1F4EE))
+    var BgElevated by mutableStateOf(Color(0xFFFFFFFF))  // cards
+    var Surface by mutableStateOf(Color(0xFFFFFFFF))
+    var SurfaceHi by mutableStateOf(Color(0xFFF4F7F1))
 
-    val Border = Color(0x14354F52)      // subtle dark hairline on light
-    val BorderHi = Color(0x24354F52)
-    val BorderAccent = Color(0x3352796F)
+    var Border by mutableStateOf(Color(0x14354F52))      // subtle dark hairline on light
+    var BorderHi by mutableStateOf(Color(0x24354F52))
+    var BorderAccent by mutableStateOf(Color(0x3352796F))
 
     // Greens (primary brand)
-    val Accent = Color(0xFF52796F)      // primary teal-green
-    val AccentBright = Color(0xFF84A98C)
-    val AccentLight = Color(0xFF84A98C)
-    val AccentDeep = Color(0xFF354F52)
-    val AccentSoft = Color(0x2284A98C)
+    var Accent by mutableStateOf(Color(0xFF52796F))      // primary teal-green
+    var AccentBright by mutableStateOf(Color(0xFF84A98C))
+    var AccentLight by mutableStateOf(Color(0xFF84A98C))
+    var AccentDeep by mutableStateOf(Color(0xFF354F52))
+    var AccentSoft by mutableStateOf(Color(0x2284A98C))
 
     // KPI tile fills (the saturated stat cards) + text that sits on them
-    val TileTeal = Color(0xFF52796F)
-    val TileSlate = Color(0xFF354F52)
-    val TileCharcoal = Color(0xFF2F3E46)
-    val OnTile = Color(0xFFF3F6F1)
-    val OnTileMuted = Color(0xCCEAEFEA)
+    var TileTeal by mutableStateOf(Color(0xFF52796F))
+    var TileSlate by mutableStateOf(Color(0xFF354F52))
+    var TileCharcoal by mutableStateOf(Color(0xFF2F3E46))
+    var OnTile by mutableStateOf(Color(0xFFF3F6F1))
+    var OnTileMuted by mutableStateOf(Color(0xCCEAEFEA))
 
-    // Text on light surfaces
-    val TextPrimary = Color(0xFF2F3E46)   // charcoal
-    val TextSecondary = Color(0xFF4A5A56)
-    val TextMuted = Color(0xFF77857D)
-    val TextFaint = Color(0xFFA1ABA2)
+    // Text on the page surfaces
+    var TextPrimary by mutableStateOf(Color(0xFF2F3E46))   // charcoal
+    var TextSecondary by mutableStateOf(Color(0xFF4A5A56))
+    var TextMuted by mutableStateOf(Color(0xFF77857D))
+    var TextFaint by mutableStateOf(Color(0xFFA1ABA2))
 
     // Status / accents
-    val Good = Color(0xFF52796F)
-    val Warn = Color(0xFFA7754D)   // tan
-    val Bad = Color(0xFFB24A3A)    // warm red, harmonised with the browns
-    val Cool = Color(0xFF5B8BA0)   // muted cool tone for temperature
+    var Good by mutableStateOf(Color(0xFF52796F))
+    var Warn by mutableStateOf(Color(0xFFA7754D))   // tan
+    var Bad by mutableStateOf(Color(0xFFB24A3A))    // warm red, harmonised with the browns
+    var Cool by mutableStateOf(Color(0xFF5B8BA0))   // muted cool tone for temperature
 
-    val Track = Color(0xFFE3E8DF)  // chart / bar track on light
-    val OrbBase = Color(0xFF2E3D38) // dark well behind the water orb, so light readout stays legible at any fill
+    var Track by mutableStateOf(Color(0xFFE3E8DF))  // chart / bar track
+    // Dark well behind the water orb, so the light readout stays legible at any fill.
+    var OrbBase by mutableStateOf(Color(0xFF2E3D38))
+
+    /** True while the dark palette is loaded — for the system bars, which are not Compose. */
+    var isDark by mutableStateOf(false)
+        private set
 
     val liquid: Brush get() = Brush.verticalGradient(listOf(AccentLight, Accent))
     fun liquid(top: Color, bottom: Color): Brush = Brush.verticalGradient(listOf(top, bottom))
     val pageBackground: Brush get() = Brush.verticalGradient(listOf(BgTop, Bg))
     val glow: Brush get() = Brush.radialGradient(listOf(AccentSoft, Color.Transparent))
+
+    /**
+     * The light palette. Kept as an explicit function rather than as the field
+     * initialisers so that switching back from dark restores every value — a partial
+     * palette is the classic way a themed app ends up with unreadable text.
+     */
+    fun applyLight() {
+        Bg = Color(0xFFEAEEE6); BgTop = Color(0xFFF1F4EE); BgElevated = Color(0xFFFFFFFF)
+        Surface = Color(0xFFFFFFFF); SurfaceHi = Color(0xFFF4F7F1)
+        Border = Color(0x14354F52); BorderHi = Color(0x24354F52); BorderAccent = Color(0x3352796F)
+        Accent = Color(0xFF52796F); AccentBright = Color(0xFF84A98C)
+        AccentLight = Color(0xFF84A98C); AccentDeep = Color(0xFF354F52); AccentSoft = Color(0x2284A98C)
+        TileTeal = Color(0xFF52796F); TileSlate = Color(0xFF354F52); TileCharcoal = Color(0xFF2F3E46)
+        OnTile = Color(0xFFF3F6F1); OnTileMuted = Color(0xCCEAEFEA)
+        TextPrimary = Color(0xFF2F3E46); TextSecondary = Color(0xFF4A5A56)
+        TextMuted = Color(0xFF77857D); TextFaint = Color(0xFFA1ABA2)
+        Good = Color(0xFF52796F); Warn = Color(0xFFA7754D); Bad = Color(0xFFB24A3A); Cool = Color(0xFF5B8BA0)
+        Track = Color(0xFFE3E8DF); OrbBase = Color(0xFF2E3D38)
+        isDark = false
+    }
+
+    /**
+     * The dark palette.
+     *
+     * Not an inversion. Two things change beyond swapping light for dark:
+     *  - the greens are lifted, because #52796F on a near-black surface fails contrast
+     *    badly — the accent has to carry text, so it moves to the brighter sage;
+     *  - the status colours are lightened for the same reason. A dark-mode warning printed
+     *    in #B24A3A is barely distinguishable from the body text.
+     */
+    fun applyDark() {
+        Bg = Color(0xFF121714); BgTop = Color(0xFF171D1A); BgElevated = Color(0xFF1C2320)
+        Surface = Color(0xFF1C2320); SurfaceHi = Color(0xFF232B27)
+        Border = Color(0x1FA9C0B4); BorderHi = Color(0x33A9C0B4); BorderAccent = Color(0x5584A98C)
+        Accent = Color(0xFF95BE9D); AccentBright = Color(0xFFAFD3B6)
+        AccentLight = Color(0xFF84A98C); AccentDeep = Color(0xFF4B6B62); AccentSoft = Color(0x2A84A98C)
+        TileTeal = Color(0xFF3E5B54); TileSlate = Color(0xFF2C4245); TileCharcoal = Color(0xFF26323A)
+        OnTile = Color(0xFFEAF1EB); OnTileMuted = Color(0xCCC5D2C7)
+        TextPrimary = Color(0xFFE7EEE8); TextSecondary = Color(0xFFB8C5BC)
+        TextMuted = Color(0xFF8B9A90); TextFaint = Color(0xFF6A776F)
+        Good = Color(0xFF8FC2A2); Warn = Color(0xFFD9A574); Bad = Color(0xFFE07E6A); Cool = Color(0xFF7FB3C8)
+        Track = Color(0xFF2A332E); OrbBase = Color(0xFF0E1512)
+        isDark = true
+    }
 }
 
 // Real design typefaces (bundled, OFL): DM Sans display + DM Mono data.
@@ -84,16 +147,22 @@ val DMMono = FontFamily(
 val Sans = DMSans
 val Mono = DMMono
 
-private val Scheme = lightColorScheme(
-    primary = Cell.Accent,
-    onPrimary = Color.White,
-    background = Cell.Bg,
-    onBackground = Cell.TextPrimary,
-    surface = Cell.Surface,
-    onSurface = Cell.TextPrimary,
-)
-
 @Composable
-fun CellspanTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, content = content)
+fun CellspanTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+    // Applied before the Material scheme is built, so both halves describe the same theme.
+    if (dark) Cell.applyDark() else Cell.applyLight()
+    val scheme = if (dark) {
+        darkColorScheme(
+            primary = Cell.Accent, onPrimary = Color(0xFF13201A),
+            background = Cell.Bg, onBackground = Cell.TextPrimary,
+            surface = Cell.Surface, onSurface = Cell.TextPrimary,
+        )
+    } else {
+        lightColorScheme(
+            primary = Cell.Accent, onPrimary = Color.White,
+            background = Cell.Bg, onBackground = Cell.TextPrimary,
+            surface = Cell.Surface, onSurface = Cell.TextPrimary,
+        )
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }

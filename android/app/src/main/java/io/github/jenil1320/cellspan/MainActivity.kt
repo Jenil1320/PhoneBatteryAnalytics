@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.core.content.ContextCompat
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.selection.selectable
@@ -31,7 +33,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +66,7 @@ import io.github.jenil1320.cellspan.ui.SettingsScreen
 import io.github.jenil1320.cellspan.ui.PrivacyPolicyScreen
 import io.github.jenil1320.cellspan.ui.TrendsScreen
 import io.github.jenil1320.cellspan.data.AppPrefs
+import io.github.jenil1320.cellspan.data.BatteryGuard
 import io.github.jenil1320.cellspan.ui.theme.Cell
 import io.github.jenil1320.cellspan.ui.theme.CellspanTheme
 import kotlinx.coroutines.delay
@@ -69,9 +74,26 @@ import kotlinx.coroutines.delay
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Light theme → dark status-bar icons so the clock/battery stay legible.
-        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = true
-        setContent { CellspanTheme { AppRoot() } }
+        setContent {
+            val dark = isSystemInDarkTheme()
+            // The system bars are not Compose, so they are told separately — and they must
+            // follow the palette. Hard-coding light icons meant a dark-mode phone drew a
+            // dark clock on a dark bar, and the navigation bar kept a near-black colour
+            // from the old palette even in light mode, leaving a black strip under a
+            // near-white app.
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            SideEffect {
+                controller.isAppearanceLightStatusBars = !dark
+                controller.isAppearanceLightNavigationBars = !dark
+                @Suppress("DEPRECATION")
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                    // From Android 15 the bars are always transparent and these are no-ops.
+                    window.statusBarColor = android.graphics.Color.TRANSPARENT
+                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                }
+            }
+            CellspanTheme(dark) { AppRoot() }
+        }
     }
 }
 
@@ -110,6 +132,11 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 ctx, live, IntentFilter(Intent.ACTION_BATTERY_CHANGED),
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
+            // Heal the guard while the app is visible. This is the one moment Android
+            // always allows a foreground service to be started, so it is the reliable
+            // recovery path after an OEM task killer has taken the guard down — the
+            // quarter-hourly watchdog can only manage it on an allowlisted phone.
+            runCatching { BatteryGuard.ensureRunning(ctx) }
             try {
                 // Tick first, then wait: a resume otherwise shows the previous
                 // session's numbers for a full minute.
@@ -151,7 +178,8 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     ) { padding ->
         Box(Modifier.fillMaxSize().background(Cell.pageBackground).padding(padding)) {
             when (tab) {
-                Tab.NOW -> NowScreen(state.snapshot, state.dailyUsage, state.socLog)
+                Tab.NOW -> NowScreen(state.snapshot, state.dailyUsage, state.socLog,
+                    state.screenSplit, state.guardRunning)
                 Tab.HEALTH -> HealthScreen(state.snapshot, state.analysis, state.history, state.sohForecast,
                     onOpenInfo = { info = it })
                 Tab.TRENDS -> TrendsScreen(state.socLog, state.dailyVitals, state.dailyUsage)
@@ -161,6 +189,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                     onOpenInfo = { info = it },
                     onSetDesignCapacity = { mah -> AppPrefs.setDesignOverrideMah(ctx, mah); vm.refresh() },
                     onSetBatteryStart = { ms -> AppPrefs.setBatteryStartMs(ctx, ms); vm.refresh() },
+                    onImported = { vm.refresh() },
                 )
             }
         }
@@ -186,6 +215,10 @@ private fun CellNavBar(current: Tab, onSelect: (Tab) -> Unit) {
                     // selectable, so TalkBack reads each tab as a tab and says which one is selected.
                     modifier = Modifier
                         .selectable(selected = active, role = Role.Tab, onClick = { onSelect(t) })
+                        // The dot plus the label came to roughly 42dp tall, under the 48dp
+                        // minimum for a touch target. sizeIn raises the hit area without
+                        // moving anything visually.
+                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                         .padding(8.dp),
                 ) {
                     Box(

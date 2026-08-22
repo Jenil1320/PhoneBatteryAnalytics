@@ -10,6 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -57,9 +59,39 @@ fun TimeSeriesChart(
 ) {
     val tm = rememberTextMeasurer()
     val lbl = TextStyle(color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.sp)
+
+    /**
+     * What a screen reader says about this chart.
+     *
+     * A bare Canvas is invisible to TalkBack — it announces nothing at all, so every chart
+     * in the app was simply absent for a blind user. A plot's meaning is carried by its
+     * shape and its endpoints, so those are what the description gives: the range covered,
+     * the first and last values, and the extremes. That is the same information a sighted
+     * reader takes from a glance.
+     */
+    val spoken = remember(points, xStart, xEnd) {
+        if (points.isEmpty()) "Chart, no data yet."
+        else {
+            val ys = points.map { it.second }
+            val dir = when {
+                ys.last() > ys.first() -> "rising"
+                ys.last() < ys.first() -> "falling"
+                else -> "flat"
+            }
+            buildString {
+                append("Chart, ${points.size} points")
+                if (xStart.isNotBlank() || xEnd.isNotBlank()) append(", $xStart to $xEnd")
+                append(". Starts at ${yFormat(ys.first())}, ends at ${yFormat(ys.last())}, $dir.")
+                append(" Lowest ${yFormat(ys.min())}, highest ${yFormat(ys.max())}.")
+            }
+        }
+    }
+
     // Long-press then slide to scrub: shows a crosshair with the value (and time) there.
     var touchX by remember { mutableStateOf<Float?>(null) }
-    val chartMod = modifier.fillMaxWidth().height(height).pointerInput(points) {
+    val chartMod = modifier
+        .semantics { contentDescription = spoken }
+        .fillMaxWidth().height(height).pointerInput(points) {
         detectDragGesturesAfterLongPress(
             onDragStart = { touchX = it.x },
             onDrag = { change, _ -> touchX = change.position.x; change.consume() },

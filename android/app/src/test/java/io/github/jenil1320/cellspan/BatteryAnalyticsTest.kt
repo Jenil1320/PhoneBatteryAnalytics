@@ -251,8 +251,17 @@ class BatteryAnalyticsTest {
     fun voltageReading_bands() {
         assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.voltageReading(3.3f).level)
         assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.voltageReading(3.8f).level)
-        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.voltageReading(4.45f).level)
         assertEquals(BatteryAnalytics.Level.INFO, BatteryAnalytics.voltageReading(null).level)
+    }
+
+    @Test
+    fun voltageReading_treatsAModernFullChargeAsHealthy() {
+        // Most 2022-and-later flagships charge to 4.45 V and several to 4.48 V. The old
+        // 4.42 V ceiling flagged every one of them "High" at the end of every charge.
+        assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.voltageReading(4.45f).level)
+        assertEquals(BatteryAnalytics.Level.GOOD, BatteryAnalytics.voltageReading(4.48f).level)
+        // Above any shipping charge voltage is still a genuine fault.
+        assertEquals(BatteryAnalytics.Level.WATCH, BatteryAnalytics.voltageReading(4.60f).level)
     }
 
     @Test

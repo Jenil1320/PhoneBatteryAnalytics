@@ -86,7 +86,18 @@ object ChargeControl {
                 .putString(K_STOP_VAL, stop).putString(K_RESUME_VAL, resume).apply()
             return Kind.SWITCH
         }
-        p(c).edit().putString(K_KIND, Kind.NONE.name).putInt(K_ENGAGED, 0).apply()
+        // Record "no switch found" — but do NOT touch the engaged flag.
+        //
+        // Clearing it here was the worst bug in this file. A probe fails whenever root is
+        // momentarily unavailable, and root IS momentarily unavailable in ordinary use:
+        // Magisk revokes a grant, the su daemon restarts after an update, the user denies
+        // a prompt by mistake. If the kernel switch was engaged at that moment, wiping the
+        // flag made every cleanup path — releaseIfEngaged, releaseIfStale, the guard's own
+        // unplug handling — believe there was nothing to undo. The switch stayed written,
+        // and the phone silently refused to charge with nothing left in the app that would
+        // ever put it back. The flag records a write we made to the kernel; only a
+        // successful release may clear it.
+        p(c).edit().putString(K_KIND, Kind.NONE.name).apply()
         return Kind.NONE
     }
 
@@ -141,14 +152,43 @@ object ChargeControl {
         if (engagedTarget(c) > 0 && (!pluggedIn || AppPrefs.chargeAlarmTarget(c) <= 0)) release(c)
     }
 
-    /** Run [script] as root; stdout on exit 0, null on any failure. Blocking. */
+    /**
+     * Run [script] as root; stdout on exit 0, null on any failure. Blocking, with a real
+     * timeout.
+     *
+     * The previous version read stdout to end-of-file *before* calling `waitFor`, which
+     * made the timeout unreachable: `readText()` blocks until the pipe closes, so a hung
+     * `su` — a Magisk prompt nobody answers, a wedged daemon — parked the calling thread
+     * forever and `waitFor` was only reached once the process had already finished. On the
+     * old design that thread was a WorkManager worker, which the platform then killed at
+     * its ten-minute ceiling.
+     *
+     * Draining the pipe on a separate thread fixes both halves: the child never blocks on
+     * a full pipe buffer, and the timeout is enforced by the caller.
+     */
     private fun su(script: String): String? = try {
         val proc = ProcessBuilder("su", "-c", script).redirectErrorStream(false).start()
-        val out = proc.inputStream.bufferedReader().readText()
+        val sb = StringBuilder()
+        val drain = Thread {
+            runCatching { proc.inputStream.bufferedReader().use { it.copyTo(StringBuilderWriter(sb)) } }
+        }.apply { isDaemon = true; start() }
         if (!proc.waitFor(SU_TIMEOUT_S, TimeUnit.SECONDS)) {
-            proc.destroyForcibly(); null
-        } else if (proc.exitValue() == 0) out else null
+            proc.destroyForcibly()
+            drain.interrupt()
+            null
+        } else {
+            // The reader can still be flushing the last of the buffer after exit.
+            drain.join(500)
+            if (proc.exitValue() == 0) sb.toString() else null
+        }
     } catch (e: Exception) {
         null
+    }
+
+    /** Minimal Writer over a StringBuilder, so the drain thread can use Reader.copyTo. */
+    private class StringBuilderWriter(private val sb: StringBuilder) : java.io.Writer() {
+        override fun write(cbuf: CharArray, off: Int, len: Int) { sb.appendRange(cbuf, off, off + len) }
+        override fun flush() {}
+        override fun close() {}
     }
 }

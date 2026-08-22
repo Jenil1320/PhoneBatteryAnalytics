@@ -1,0 +1,9 @@
+<resources>
+    <!-- Dark launch window, so a cold start on a dark phone does not flash white. -->
+    <style name="Theme.Cellspan" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/windowBgDark</item>
+        <item name="android:statusBarColor">@color/windowBgDark</item>
+        <item name="android:navigationBarColor">@color/windowBgDark</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

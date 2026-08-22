@@ -27,25 +27,70 @@ This is clearly labelled as an estimate in the app.
 turning the estimate into a measurement and unlocking lifetime stats. On stock,
 unrooted Android those nodes are blocked by SELinux and the app falls back cleanly.
 
-**History.** A `WorkManager` job records a sample a few times a day into a local
-SQLite database, so the Trends screen fills in over the following weeks. Nothing
-leaves the device.
+**History.** A `WorkManager` job records a sample every hour into a local SQLite
+database, so the Trends screen fills in over the following weeks. Nothing leaves the
+device. Settings can export the whole history to a JSON file and import one back —
+merging, never replacing, so importing the same file twice changes nothing.
 
-**Battery life saver.** A plug-in reminder at the bottom of the charge band and a
-charge limit at the top. On a rooted phone the limit genuinely stops the charge:
+**Battery life saver.** A plug-in reminder at the bottom of the charge band, a
+charge limit at the top, and an optional overheat warning.
+
+The reminders fire at the *exact* level you pick. That needs explaining, because it
+is the one thing an obvious implementation gets wrong. `ACTION_BATTERY_CHANGED` is
+the only signal Android sends on every single percentage point, and the platform
+refuses to deliver it to a receiver declared in a manifest — it only goes to a
+running process. So Cellspan runs one:
+[`BatteryGuardService`](app/src/main/java/io/github/jenil1320/cellspan/data/BatteryGuardService.kt),
+a foreground service that exists solely to listen. It does no polling, holds no
+wake lock, and costs one quiet card in the notification shade, which doubles as a
+live readout. It runs only while you have armed a reminder.
+
+The previous design polled with `WorkManager` instead, and could not do better than
+"somewhere past the level you chose": the charge side checked every three minutes,
+and a 65 W charger gains about four points a minute, so an 80% target announced
+itself in the high eighties. The discharge side was an ordinary deferrable job, so
+App Standby could hold a check back for hours.
+
+How hard the reminders push is yours to set — once, keep asking, or insistent.
+Below 5% the choice is overridden: that alert uses the alarm sound and bypasses Do
+Not Disturb, because a reminder you sleep through at 4% has failed at its only job.
+All decisions live in the pure, unit-tested
+[`GuardPolicy`](app/src/main/java/io/github/jenil1320/cellspan/data/GuardPolicy.kt).
+
+On a rooted phone the limit genuinely stops the charge:
 [`ChargeControl`](app/src/main/java/io/github/jenil1320/cellspan/data/ChargeControl.kt)
 finds the kernel's charging switch (Pixel `charge_stop_level`, or a
-`charging_enabled`-style boolean) and the alarm loop drives it, releasing it on
-unplug so the phone can never be left refusing to charge. Without root no app can
-cut the power, so the limit falls back to a pinned, repeating unplug reminder and
-links the phone's own charging-limit setting.
+`charging_enabled`-style boolean) and the guard drives it, releasing it on unplug so
+the phone can never be left refusing to charge. Without root no app can cut the
+power, so the limit falls back to a repeating unplug reminder and links the phone's
+own charging-limit setting.
+
+**Screen-on vs screen-off drain.** Because the guard sees every percentage point
+*and* every screen transition, it can attribute each one to whichever state the
+phone was in, weighted by time. That gives the figure every competing app leads
+with — what your screen actually costs you per hour, against what the phone spends
+asleep — without any extra sampling.
+
+**Every number carries its error bar.** Health is shown with the source that
+produced it and how far it could be out — "6 charge sessions, ±2 pts" — because the
+same 91% backed by ten agreeing sessions and by one shallow one are not the same
+claim. Where the data cannot support a figure the app shows nothing rather than a
+confident guess.
 
 ## Screens
 
-- **Health** — the headline SoH number, a condition pill, the capacity trend, key
-  stats, and a plain-language forecast of when it reaches 80%.
-- **Trends** — SoH and cycle history over time, plus since-manufacture averages.
-- **Diagnose** — full battery spec and a transparent note on the current data source.
+- **Now** — live level, vitals, time to full while charging, how long the charge
+  will last, and the screen-on versus screen-off drain split.
+- **Health** — the headline SoH number with its confidence, a condition pill, the
+  capacity trend, measured against a modelled "typical" cell, and a forecast of when
+  it reaches 80%.
+- **Trends** — temperature, voltage, current and cycles over a day, week, month or
+  year, plus a custom date range.
+- **History** — every charge and discharge session.
+- **Settings** — the life saver band, background sampling, design capacity and
+  battery age overrides, and data export/import.
+
+The whole app follows the system light or dark theme.
 
 ## Build
 

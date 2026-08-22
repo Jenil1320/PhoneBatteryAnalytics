@@ -4,32 +4,40 @@ import android.app.Application
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
-import io.github.jenil1320.cellspan.data.ChargeAlarm
+import io.github.jenil1320.cellspan.data.BatteryGuard
+import io.github.jenil1320.cellspan.data.BatteryGuardNotifications
 import io.github.jenil1320.cellspan.data.ChargeControl
-import io.github.jenil1320.cellspan.data.LowBatteryAlarm
 import io.github.jenil1320.cellspan.data.SampleScheduler
 
 class CellspanApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Notification channels for the two battery life saver reminders.
-        ChargeAlarm.ensureChannel(this)
-        LowBatteryAlarm.ensureChannel(this)
-        // Re-arm both loops: a force-stop drops the plug/unplug broadcast that normally
-        // starts them, and the user would never know the limit had gone quiet.
-        LowBatteryAlarm.resume(this)
-        ChargeAlarm.resume(this)
-        // Root-cap safety net: if a force-stop left the kernel cap engaged with no loop
-        // supervising it, put the defaults back so the phone charges normally.
-        if (ChargeControl.engagedTarget(this) > 0) {
-            Thread {
-                val sticky = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                val plugged = (sticky?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
-                ChargeControl.releaseIfStale(this, plugged)
-            }.start()
-        }
-        // Hourly background sample, honouring the user's switch in Settings.
-        SampleScheduler.apply(this)
+        // Channels must exist before anything can post to them, and creating a channel
+        // that already exists is a no-op, so this is cheap on every start.
+        BatteryGuardNotifications.ensureChannels(this)
+
+        // Everything else touches SharedPreferences, WorkManager or a binder, and
+        // Application.onCreate is on the main thread ahead of the first frame. Doing it
+        // here used to add measurable time to a cold start on a slow phone, so it moves
+        // off-thread; nothing in it needs to be finished before the UI appears.
+        Thread {
+            runCatching {
+                // Re-arm the guard: a force-stop takes the service down without warning,
+                // and the user would never know their limits had gone quiet.
+                BatteryGuard.sync(this)
+
+                // Root-cap safety net: if a force-stop left the kernel cap engaged with
+                // nothing supervising it, put the defaults back so the phone charges.
+                if (ChargeControl.engagedTarget(this) > 0) {
+                    val sticky = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val plugged = (sticky?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+                    ChargeControl.releaseIfStale(this, plugged)
+                }
+
+                // Hourly background sample, honouring the user's switch in Settings.
+                SampleScheduler.apply(this)
+            }
+        }.start()
     }
 }

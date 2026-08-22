@@ -47,21 +47,11 @@ object BatteryReader {
         val voltageV = sticky?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
             ?.takeIf { it > 0 }?.let { it / 1000f }
 
-        // Normalise the current's sign from the charge status. OEMs disagree on the
-        // sign of CURRENT_NOW (AOSP: + into the battery; several, e.g. Samsung, invert
-        // it), so we force it: charging → positive, discharging → negative. This keeps
-        // the "positive = charging" convention true on every manufacturer. Magnitude is
-        // untouched, and abs()-based consumers are unaffected.
+        // Normalise BOTH the sign and the unit of CURRENT_NOW — OEMs get each of them
+        // wrong, independently. See [normaliseCurrentUa].
         val currentUa = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
             .takeIf { it != Long.MIN_VALUE && it != 0L }
-            ?.let { raw ->
-                val mag = kotlin.math.abs(raw)
-                when (statusStr) {
-                    "Charging" -> mag
-                    "Discharging" -> -mag
-                    else -> raw   // Full / Not charging / Unknown: near zero, keep as-is
-                }
-            }
+            ?.let { normaliseCurrentUa(it, statusStr, unitsAreMicro(context, kotlin.math.abs(it))) }
         val chargeCounter = bm.getLongProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
             .takeIf { it != Long.MIN_VALUE && it > 0 }
 
@@ -106,6 +96,89 @@ object BatteryReader {
             manufacturingEpoch = mfg,
             stateOfHealthPct = soh,
         )
+    }
+
+    /**
+     * Turn a raw `BATTERY_PROPERTY_CURRENT_NOW` into signed microamps.
+     *
+     * The Android documentation says microamps, positive into the battery. Real devices
+     * disagree on both halves, and each one has to be fixed separately.
+     *
+     * **Sign.** AOSP means positive while charging; several manufacturers, Samsung most
+     * visibly, invert it. Rather than keep a device blacklist, the sign is taken from the
+     * charge status, which every device reports correctly. Charging is forced positive and
+     * discharging negative, so "positive means charging" holds everywhere.
+     *
+     * **Unit.** A well-known driver bug reports milliamps through the microamp property.
+     * Xiaomi and several other ROMs have shipped it. Unfixed, every derived figure is off
+     * by a thousand: a 3000 mA fast charge is displayed as "3 mA", instantaneous power
+     * reads 0.01 W instead of 12 W, [BatteryAnalytics.chargeRate] calls a 30 W charger
+     * "Trickle", and the fuel-gauge runtime estimate returns a figure a thousand times too
+     * long.
+     *
+     * **The unit is settled per device, not per reading.** Judging each reading on its own
+     * magnitude is unsafe, because small values are genuinely reachable on a correct
+     * device: a phone held at a root charge cap, or in the last minutes of the
+     * constant-voltage taper, really does report a few milliamps — 3000 µA. Scaling that
+     * would claim a 3 A, 12 W charge on a phone doing almost nothing, label it fast
+     * charging, and collapse the runtime estimate from days to minutes.
+     *
+     * The reliable discriminator runs the other way: a reading too large to be milliamps.
+     * No phone battery carries 20 A, so a magnitude at or above [MICRO_PROOF_UA] can only
+     * be microamps, and a device with the milliamp bug can never produce one. The first
+     * such reading settles the question for good, and the answer is remembered so a cold
+     * start on a resting phone does not have to guess again.
+     *
+     * Until a device has proved itself, small readings are still scaled — that is the case
+     * the correction exists for — but only while the phone is actively charging or
+     * discharging. A near-zero current on a Full or Not-charging phone is the expected
+     * reading, not a symptom.
+     */
+    fun normaliseCurrentUa(raw: Long, status: String, unitsKnownMicro: Boolean = false): Long {
+        val mag = kotlin.math.abs(raw)
+        val moving = status == "Charging" || status == "Discharging"
+        val looksLikeMa = !unitsKnownMicro && moving &&
+            mag in 1 until MA_SUSPICION_CEILING && mag * 1000 <= MAX_PLAUSIBLE_UA
+        val scaled = if (looksLikeMa) mag * 1000 else mag
+        return when (status) {
+            "Charging" -> scaled
+            "Discharging" -> -scaled
+            // Full / Not charging / Unknown: near zero either way, so keep the reported
+            // direction rather than inventing one.
+            else -> if (raw < 0) -scaled else scaled
+        }
+    }
+
+    /** A magnitude at or above this can only be microamps, so it settles the device's unit. */
+    const val MICRO_PROOF_UA = 20_000L
+
+    /** Readings below this (5 mA expressed in µA) are suspected of being milliamps. */
+    private const val MA_SUSPICION_CEILING = 5_000L
+
+    /** 15 A. Above this no phone cell is charging or discharging, so the scale-up is wrong. */
+    private const val MAX_PLAUSIBLE_UA = 15_000_000L
+
+    /**
+     * Cached once the device has proved it reports microamps. Held in preferences as well
+     * as memory, because the proof may not repeat for a long while — a phone parked at a
+     * charge cap reports small values indefinitely.
+     */
+    @Volatile private var unitsMicro: Boolean? = null
+
+    private fun unitsAreMicro(context: Context, rawMagnitude: Long): Boolean {
+        val prefs = context.getSharedPreferences("cellspan_prefs", Context.MODE_PRIVATE)
+        var known = unitsMicro ?: prefs.getBoolean("current_units_micro", false).also { unitsMicro = it }
+        // A ceiling as well as a floor. Proof needs a value that is too large to be
+        // milliamps but still physically possible — a stuck sentinel such as 2147483647,
+        // or a transient spike far beyond what any cell can carry, is garbage, and letting
+        // it "prove" the unit would latch the wrong answer into preferences for the life
+        // of the install with no path that ever clears it.
+        if (!known && rawMagnitude in MICRO_PROOF_UA..MAX_PLAUSIBLE_UA) {
+            known = true
+            unitsMicro = true
+            prefs.edit().putBoolean("current_units_micro", true).apply()
+        }
+        return known
     }
 
     /** Design charge is a constant of the cell, so the node is read at most once. */

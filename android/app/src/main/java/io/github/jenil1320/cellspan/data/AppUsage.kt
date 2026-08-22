@@ -36,6 +36,13 @@ private val FRIENDLY = mapOf(
  */
 object AppUsage {
 
+    /**
+     * How much of an unclosed foreground span to believe. Four hours: long enough for a
+     * genuine film or a long drive with navigation up, short enough that a lost
+     * background event cannot silently claim a whole day.
+     */
+    private const val MAX_OPEN_TAIL_MS = 4 * 60 * 60_000L
+
     fun hasAccess(context: Context): Boolean = try {
         val ops = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
         val mode = if (Build.VERSION.SDK_INT >= 29) {
@@ -67,8 +74,21 @@ object AppUsage {
                 }
             }
         }
-        // Close out apps still in the foreground at `now`.
-        for ((pkg, start) in openedAt) if (now > start) fg[pkg] = (fg[pkg] ?: 0L) + (now - start)
+        // Close out apps still in the foreground at `now` — but only the one that plausibly
+        // still is.
+        //
+        // A MOVE_TO_FOREGROUND without a matching MOVE_TO_BACKGROUND does not mean the app
+        // is still open. The platform drops background events when a process is killed, and
+        // some OEMs never emit them at all for their own apps. Crediting every orphan right
+        // up to `now` therefore handed hours of "screen time" to apps the user had not
+        // touched since morning, and on a bad ROM the totals exceeded the length of the
+        // window itself. Only the most recent open can still be running, and even that is
+        // capped so a stale event cannot inflate the list.
+        val stillOpen = openedAt.maxByOrNull { it.value }
+        if (stillOpen != null && now > stillOpen.value) {
+            val span = (now - stillOpen.value).coerceAtMost(MAX_OPEN_TAIL_MS)
+            fg[stillOpen.key] = (fg[stillOpen.key] ?: 0L) + span
+        }
         fg.remove(context.packageName)
 
         val pm = context.packageManager

@@ -32,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,13 +46,15 @@ import io.github.jenil1320.cellspan.analytics.Analysis
 import io.github.jenil1320.cellspan.analytics.BatteryAnalytics
 import io.github.jenil1320.cellspan.analytics.CapacitySource
 import io.github.jenil1320.cellspan.analytics.Condition
+import io.github.jenil1320.cellspan.analytics.Confidence
 import io.github.jenil1320.cellspan.analytics.DrainForecaster
 import io.github.jenil1320.cellspan.analytics.SohForecaster
 import io.github.jenil1320.cellspan.data.AppPrefs
 import io.github.jenil1320.cellspan.data.BatterySnapshot
-import io.github.jenil1320.cellspan.data.ChargeAlarm
+import io.github.jenil1320.cellspan.data.BatteryGuard
+import io.github.jenil1320.cellspan.data.BatteryGuardNotifications
+import io.github.jenil1320.cellspan.data.GuardPolicy
 import io.github.jenil1320.cellspan.data.ChargeControl
-import io.github.jenil1320.cellspan.data.LowBatteryAlarm
 import io.github.jenil1320.cellspan.data.SystemChargeLimit
 import io.github.jenil1320.cellspan.data.HistoryPoint
 import io.github.jenil1320.cellspan.data.SocPoint
@@ -62,9 +65,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import android.widget.Toast
 import android.content.Intent
 import android.net.Uri
@@ -119,6 +125,7 @@ fun conditionColor(c: Condition) = when (c) {
     Condition.REPLACE -> Cell.Bad; Condition.UNKNOWN -> Cell.TextMuted
 }
 private fun tempColor(b: BatteryAnalytics.TempBand) = when (b) {
+    BatteryAnalytics.TempBand.FREEZING -> Cell.Bad
     BatteryAnalytics.TempBand.COOL -> Cell.Cool; BatteryAnalytics.TempBand.NORMAL -> Cell.Good
     BatteryAnalytics.TempBand.WARM -> Cell.Warn; BatteryAnalytics.TempBand.HOT -> Cell.Bad
     BatteryAnalytics.TempBand.UNKNOWN -> Cell.TextMuted
@@ -202,7 +209,13 @@ private fun socToday(soc: List<SocPoint>, dayStartMs: Long): List<Pair<Float, Fl
 }
 // ── Now ──────────────────────────────────────────────────────────────────────
 @Composable
-fun NowScreen(snapshot: BatterySnapshot?, dailyUsage: List<Pair<String, Double>>, socLog: List<SocPoint>) {
+fun NowScreen(
+    snapshot: BatterySnapshot?,
+    dailyUsage: List<Pair<String, Double>>,
+    socLog: List<SocPoint>,
+    screenSplit: HistoryStore.ScreenSplit? = null,
+    guardRunning: Boolean = false,
+) {
     // Plain local, not remember: every battery broadcast recomposes this, and the boundary
     // has to roll over at midnight rather than stick at the value it was first composed with.
     val dayStart = startOfToday()
@@ -246,6 +259,32 @@ fun NowScreen(snapshot: BatterySnapshot?, dailyUsage: List<Pair<String, Double>>
             }
         }
 
+
+        // Charging: how long until it is full, and until the user's own limit.
+        //
+        // The charging half of this screen used to show nothing but a rate word. "Time to
+        // full" is the single most asked-for figure while a phone is on the cable, and the
+        // app already had every input it needed.
+        if (status == "Charging") {
+            val chargeRate = BatteryAnalytics.chargeRatePctPerHour(recentSoc)
+            val toFull = BatteryAnalytics.timeToLevelMs(level, 100, chargeRate, status)
+            val limit = AppPrefs.chargeAlarmTarget(LocalContext.current)
+            val toLimit = if (limit in 1..99)
+                BatteryAnalytics.timeToLevelMs(level, limit, chargeRate, status) else null
+            if (toFull != null || toLimit != null) {
+                Spacer(Modifier.height(16.dp))
+                Appear(60) {
+                    SurfaceCard {
+                        Column {
+                            SectionLabel("Time to charge")
+                            Spacer(Modifier.height(6.dp))
+                            toLimit?.let { EnduranceRow("To your $limit% limit", Fmt.duration(it), Cell.Accent) }
+                            toFull?.let { EnduranceRow("To full", Fmt.duration(it), Cell.TextPrimary) }
+                        }
+                    }
+                }
+            }
+        }
 
         // "Lasts for" at light / normal / heavy use (mockup 2c), scaled off the recent drain.
         if (status == "Discharging" && dischargeRate != null && dischargeRate > 0.0) {
@@ -358,7 +397,61 @@ fun NowScreen(snapshot: BatterySnapshot?, dailyUsage: List<Pair<String, Double>>
                 }
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+        Appear(240) { ScreenDrainCard(screenSplit, guardRunning) }
+
         Spacer(Modifier.height(80.dp))
+    }
+}
+
+/**
+ * What the screen costs, against what the phone spends while it is asleep.
+ *
+ * This is the comparison a user can act on — "eleven percent an hour on screen, half a
+ * percent asleep" tells them whether to look at brightness or at a misbehaving background
+ * app. It needs the battery guard running, because only the guard sees every one-point
+ * change together with the screen state at that moment, so the card says so plainly rather
+ * than sitting empty.
+ */
+@Composable
+private fun ScreenDrainCard(split: HistoryStore.ScreenSplit?, guardRunning: Boolean) {
+    val on = split?.onRate
+    val off = split?.offRate
+    SurfaceCard {
+        Column {
+            SectionLabel("Where the charge goes")
+            Spacer(Modifier.height(10.dp))
+            if (on == null && off == null) {
+                Text(
+                    if (guardRunning)
+                        "Measuring. Once the phone has spent a while both awake and asleep on battery, the two rates appear here."
+                    else
+                        "Turn on the battery life saver in Settings and Cellspan can measure this — it needs to watch the level while the app is closed.",
+                    color = Cell.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp,
+                )
+                return@Column
+            }
+            EnduranceRow("Screen on", on?.let { String.format(Locale.US, "%.1f%% / h", it) } ?: "—", Cell.Warn)
+            EnduranceRow("Screen off", off?.let { String.format(Locale.US, "%.1f%% / h", it) } ?: "—", Cell.Good)
+            if (on != null && off != null && off > 0.05) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    String.format(
+                        Locale.US,
+                        "Your screen costs about %.0f times what the phone uses asleep. Last 7 days.",
+                        on / off,
+                    ),
+                    color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp,
+                )
+            } else if (off != null && off > 2.0) {
+                // A phone should sit near 1%/h asleep. Several times that is a real,
+                // fixable problem and worth naming rather than just plotting.
+                Spacer(Modifier.height(8.dp))
+                Text("That is high for a sleeping phone — something is keeping it awake. Check Settings > Battery for an app using power in the background.",
+                    color = Cell.Warn, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+        }
     }
 }
 
@@ -382,13 +475,15 @@ fun HealthScreen(
                 append(snapshot?.model ?: "Battery"); analysis?.ageDays?.let { append(" · ${Fmt.age(it)}") }
             }, color = Cell.TextFaint, fontFamily = Mono, fontSize = 11.sp)
         }
-        // "Firm" = a real measurement: the platform's own figure, the fuel gauge, or a
-        // completed charge session. Otherwise the value is just the noisy instantaneous
-        // estimate, shown as ~approx.
-        val firm = analysis?.let {
-            it.capacitySource == CapacitySource.DEVICE || it.capacitySource == CapacitySource.GAUGE ||
-                it.capacitySource == CapacitySource.SESSION
-        } ?: false
+        // How much this figure can be trusted, judged on its own error bar rather than on
+        // "did it come from a session?". One 25-point charge used to be enough to drop the
+        // tilde and print a confident integer, and the next session could then move it
+        // several points with no explanation — which reads as the app being unreliable,
+        // when in fact it was becoming more precise.
+        val uncertainty = analysis?.sohUncertaintyPts
+        val confidence = BatteryAnalytics.confidenceFor(uncertainty)
+        val firm = confidence == Confidence.HIGH ||
+            confidence == Confidence.MEDIUM
         val sohInt = analysis?.sohPct?.toInt() ?: 0
         var target by remember { mutableIntStateOf(0) }
         LaunchedEffect(sohInt) { target = sohInt }
@@ -419,6 +514,26 @@ fun HealthScreen(
                 analysis?.let {
                     if (firm) ConditionPill(it.condition.label, conditionColor(it.condition))
                     else ConditionPill("Estimating", Cell.TextMuted)
+                }
+                // The evidence line: where the number came from, how much of it there is,
+                // and the error bar. A reader can now tell "91%" backed by ten agreeing
+                // sessions apart from "91%" backed by one shallow one.
+                analysis?.let { a ->
+                    val src = when (a.capacitySource) {
+                        CapacitySource.DEVICE -> "reported by phone"
+                        CapacitySource.GAUGE -> "fuel gauge"
+                        CapacitySource.SESSION -> "${a.sessionCount} charge " +
+                            if (a.sessionCount == 1) "session" else "sessions"
+                        CapacitySource.ESTIMATE -> "live estimate"
+                        CapacitySource.NONE -> null
+                    }
+                    if (src != null && a.sohPct != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            src + (uncertainty?.let { String.format(Locale.US, " · ±%.0f pts", it.coerceAtLeast(1.0)) } ?: ""),
+                            color = Cell.TextMuted, fontFamily = Mono, fontSize = 10.5.sp,
+                        )
+                    }
                 }
             }
             Column(Modifier.width(126.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -467,12 +582,19 @@ fun HealthScreen(
                     // Without a battery start date the model drops its age/heat term, so this
                     // column compares cycle count alone and must not claim otherwise.
                     val hasCal = analysis.modeledHasCalendar
-                    // A band, not a point: the assumed rest voltage, temperature and depth of
-                    // discharge together move this by about MODEL_BAND_PTS points. The verdict
-                    // below is judged on these same two integers, so the card can never call a
-                    // battery "wearing faster" while printing a band that contains it.
-                    val loPts = (modeled - MODEL_BAND_PTS).coerceAtLeast(0.0).toInt()
-                    val hiPts = (modeled + MODEL_BAND_PTS).coerceAtMost(100.0).toInt()
+                    // A band, not a point, and its width has to cover BOTH uncertainties or
+                    // the verdict underneath is unearned. The model's own assumptions (rest
+                    // voltage, mean temperature, depth of discharge) move it by about
+                    // MODEL_BAND_PTS; the measured figure carries its own error bar, which
+                    // for a live estimate is another 6 points. Comparing a ±6 measurement
+                    // against a ±6 model with only one of the two shown let this card
+                    // announce "wearing faster than typical" on a difference smaller than
+                    // either error — while the Forecast card below, using a different
+                    // threshold, said the opposite.
+                    val measuredErr = analysis.sohUncertaintyPts ?: 0.0
+                    val band = kotlin.math.sqrt(MODEL_BAND_PTS * MODEL_BAND_PTS + measuredErr * measuredErr)
+                    val loPts = (modeled - band).coerceAtLeast(0.0).toInt()
+                    val hiPts = (modeled + band).coerceAtMost(100.0).toInt()
                     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                         SourceCol("Measured", measured?.let { "${it.toInt()}%" } ?: "—", srcSub,
                             conditionColor(analysis.condition), Modifier.weight(1f))
@@ -573,7 +695,10 @@ fun HealthScreen(
                         color = Cell.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 20.sp,
                         modifier = Modifier.padding(top = 8.dp),
                     )
-                    if (trendy) {
+                    // Shown on BOTH paths. Gating it on the trend path was backwards: the
+                    // physics path is taken precisely because the data was too thin to fit,
+                    // so a bare date there read as more certain than the well-fitted one.
+                    run {
                         val lo = fc.etaLowMs; val hi = fc.etaHighMs
                         if (lo != null && hi != null && Fmt.date(lo) != Fmt.date(hi)) {
                             Text("Likely range: ${Fmt.date(lo)} – ${Fmt.date(hi)}.",
@@ -646,9 +771,14 @@ fun SettingsScreen(
     onOpenInfo: (String) -> Unit = {},
     onSetDesignCapacity: (Int?) -> Unit = {},
     onSetBatteryStart: (Long?) -> Unit = {},
+    /** Called after a successful import, so the screens reload from the merged history. */
+    onImported: () -> Unit = {},
 ) {
-    var showDesignDialog by remember { mutableStateOf(false) }
-    var showAgeDialog by remember { mutableStateOf(false) }
+    // rememberSaveable, not remember: an open dialog and half-typed input are lost on a
+    // rotation otherwise, and the design-capacity field is a number the user has usually
+    // just looked up on another screen.
+    var showDesignDialog by rememberSaveable { mutableStateOf(false) }
+    var showAgeDialog by rememberSaveable { mutableStateOf(false) }
     if (showDesignDialog) {
         DesignCapacityDialog(
             current = analysis?.designCapacityMah,
@@ -727,6 +857,37 @@ fun SettingsScreen(
                 }
             }
         }
+        // The other half of the promise the export card makes. Without it "your history
+        // survives a new phone" was only ever half true — the file could be written and
+        // never read back.
+        val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) scope.launch(Dispatchers.IO) {
+                // catch Throwable, not Exception. The obvious mistake here is picking the
+                // wrong file, and a 300 MB video read into a String throws OutOfMemoryError,
+                // which is an Error — it slipped straight past a catch on Exception and
+                // killed the process instead of showing the failure toast.
+                val msg = try {
+                    val size = documentSizeBytes(ctx, uri)
+                    require(size == null || size <= MAX_IMPORT_BYTES) { "too large" }
+                    val text = ctx.contentResolver.openInputStream(uri)?.use { stream ->
+                        // Bounded even when the provider would not tell us the size.
+                        stream.reader().readAtMost(MAX_IMPORT_CHARS)
+                    } ?: error("could not open the file")
+                    val r = HistoryStore(ctx).use { store -> store.importJson(text) }
+                    if (r.total == 0) "Nothing new to import — this data is already here."
+                    else "Imported ${r.total} records. Your history is merged, nothing was replaced."
+                } catch (e: IllegalArgumentException) {
+                    if (e.message == "too large") "That file is too big to be a Cellspan export."
+                    else "That is not a Cellspan export file."
+                } catch (e: Throwable) {
+                    "Could not read that file."
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                    onImported()
+                }
+            }
+        }
         Spacer(Modifier.height(16.dp))
         SurfaceCard {
             Column {
@@ -755,14 +916,30 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(14.dp))
-                Box(
-                    Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
-                        .border(1.dp, Cell.BorderAccent, RoundedCornerShape(10.dp))
-                        .clickable { exporter.launch("cellspan-battery-data.json") }
-                        .padding(horizontal = 16.dp, vertical = 11.dp),
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text("Export battery data", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.AccentSoft)
+                            .border(1.dp, Cell.BorderAccent, RoundedCornerShape(10.dp))
+                            .clickable { exporter.launch("cellspan-battery-data.json") }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                    ) {
+                        Text("Export", color = Cell.Accent, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                    }
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(Cell.SurfaceHi)
+                            .border(1.dp, Cell.Border, RoundedCornerShape(10.dp))
+                            .clickable { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                    ) {
+                        Text("Import", color = Cell.TextSecondary, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                    }
                 }
+                Spacer(Modifier.height(10.dp))
+                Text("Import merges a file you exported before — from this phone or an older one. It never replaces what is already here, and importing the same file twice changes nothing.",
+                    color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
 
@@ -903,10 +1080,16 @@ private fun BackgroundSamplingCard() {
 }
 
 /**
- * Battery life saver: keeps the cell inside its gentle band. The bottom end is a plug-in
- * reminder. The top end is a real charge stop when root is present ([ChargeControl]);
- * otherwise a repeating unplug reminder, with the phone's own limit linked as the only
- * true cap a stock device has (see [SystemChargeLimit]).
+ * Battery life saver: keeps the cell inside its gentle band, and warns when it runs hot.
+ *
+ * The bottom end is a plug-in reminder. The top end is a real charge stop when root is
+ * present ([ChargeControl]); otherwise a repeating unplug reminder, with the phone's own
+ * limit linked as the only true cap a stock device has (see [SystemChargeLimit]).
+ *
+ * Every control here writes a preference and then calls [BatteryGuard.sync], which is the
+ * one place that decides whether the guard service should be running. Nothing on this
+ * screen schedules or cancels work directly any more: three call sites each holding their
+ * own opinion about when a loop should run is how reminders went quiet unnoticed.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -914,51 +1097,78 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
     val ctx = LocalContext.current
     var lowLevel by remember { mutableIntStateOf(AppPrefs.lowBatteryAlert(ctx)) }
     var target by remember { mutableIntStateOf(AppPrefs.chargeAlarmTarget(ctx)) }
-    // A blocked notification makes both reminders silently useless, so the card says so.
-    var notifsOn by remember { mutableStateOf(NotificationManagerCompat.from(ctx).areNotificationsEnabled()) }
-    // Whether this phone can genuinely stop its charge. Re-probed on every visit so a
-    // freshly rooted (or unrooted) phone is picked up; on stock devices the probe fails
-    // in milliseconds. Decides the wording: a "limit" that only reminds must not say "stop".
+    var strictness by remember { mutableStateOf(AppPrefs.strictness(ctx)) }
+    var tempAlert by remember { mutableStateOf(AppPrefs.tempAlertC(ctx)) }
+    // Both halves matter, and the old check only did the first: a user can leave app
+    // notifications enabled and still switch off the one channel these alerts use, in
+    // which case every post is dropped while the app believes all is well.
+    var notifsOn by remember { mutableStateOf(BatteryGuardNotifications.anyAlertChannelReachable(ctx)) }
+    // Whether this phone can genuinely stop its charge. Decides the wording: a "limit"
+    // that only reminds must not say "stop".
     var canStop by remember { mutableStateOf(ChargeControl.kind(ctx) != ChargeControl.Kind.NONE) }
+    // Probe once per install, not once per visit. probe() runs `su`, which raises the
+    // root-permission dialog on a rooted phone; doing that on every trip to Settings
+    // taught people to deny it.
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { canStop = ChargeControl.probe(ctx) != ChargeControl.Kind.NONE }
+        if (!ChargeControl.hasProbed(ctx)) {
+            withContext(Dispatchers.IO) { canStop = ChargeControl.probe(ctx) != ChargeControl.Kind.NONE }
+        }
     }
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        notifsOn = BatteryGuardNotifications.anyAlertChannelReachable(ctx)
+        BatteryGuard.sync(ctx)
     }
     val notifSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        notifsOn = BatteryGuardNotifications.anyAlertChannelReachable(ctx)
+        BatteryGuard.sync(ctx)
     }
-    val systemSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {}
+    var unrestrictedBg by remember { mutableStateOf(SampleScheduler.isUnrestricted(ctx)) }
+    val systemSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        unrestrictedBg = SampleScheduler.isUnrestricted(ctx)
+        BatteryGuard.sync(ctx)
+    }
+
+    /**
+     * Ask for the notification permission, but only while it can still be granted. Firing
+     * the request again after two refusals is a no-op the user never sees, so the card
+     * would sit there claiming alerts work while nothing had changed.
+     */
+    fun requestNotifsIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33 && !notifsOn) {
+            permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     fun applyLow(v: Int) {
         lowLevel = v
         AppPrefs.setLowBatteryAlert(ctx, v)
-        if (v > 0) {
-            if (Build.VERSION.SDK_INT >= 33) permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            // Only start the watch when the phone is actually on battery; plugging out
-            // later starts it from the power broadcast.
-            if (!plugged) LowBatteryAlarm.scheduleCheck(ctx, 0)
-        } else {
-            LowBatteryAlarm.cancel(ctx)
-            LowBatteryAlarm.cancelNotification(ctx)
-        }
-        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        if (v > 0) requestNotifsIfNeeded()
+        BatteryGuard.sync(ctx)
+        notifsOn = BatteryGuardNotifications.anyAlertChannelReachable(ctx)
     }
 
     fun applyHigh(v: Int) {
         target = v
         AppPrefs.setChargeAlarmTarget(ctx, v)
-        if (v > 0) {
-            if (Build.VERSION.SDK_INT >= 33) permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            if (plugged) ChargeAlarm.scheduleCheck(ctx, 0)
-        } else {
-            ChargeAlarm.cancel(ctx)
-            ChargeAlarm.cancelNotification(ctx)
-            // The cap may be holding a charge right now; su must stay off the main thread.
-            Thread { ChargeControl.releaseIfEngaged(ctx) }.start()
-        }
-        notifsOn = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+        if (v > 0) requestNotifsIfNeeded()
+        // The cap may be holding a charge right now; su must stay off the main thread.
+        if (v <= 0) Thread { ChargeControl.releaseIfEngaged(ctx) }.start()
+        BatteryGuard.sync(ctx)
+        notifsOn = BatteryGuardNotifications.anyAlertChannelReachable(ctx)
+    }
+
+    fun applyStrictness(s: GuardPolicy.Strictness) {
+        strictness = s
+        AppPrefs.setStrictness(ctx, s)
+        BatteryGuard.sync(ctx)
+    }
+
+    fun applyTemp(v: Float?) {
+        tempAlert = v
+        AppPrefs.setTempAlertC(ctx, v)
+        if (v != null) requestNotifsIfNeeded()
+        BatteryGuard.sync(ctx)
+        notifsOn = BatteryGuardNotifications.anyAlertChannelReachable(ctx)
     }
 
     SurfaceCard {
@@ -988,15 +1198,78 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
             Spacer(Modifier.height(8.dp))
             LevelChips(listOf(0, 80, 85, 90, 95), target, ::applyHigh)
 
+            if (lowLevel > 0 || target > 0) {
+                Spacer(Modifier.height(16.dp))
+                Text("How insistent", color = Cell.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(8.dp))
+                ChoiceChips(
+                    listOf(
+                        GuardPolicy.Strictness.GENTLE to "Once",
+                        GuardPolicy.Strictness.PERSISTENT to "Keep asking",
+                        GuardPolicy.Strictness.INSISTENT to "Insistent",
+                    ),
+                    strictness, ::applyStrictness,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    when (strictness) {
+                        GuardPolicy.Strictness.GENTLE ->
+                            "One alert, then the reminder waits quietly in the shade."
+                        GuardPolicy.Strictness.PERSISTENT ->
+                            "Repeats every few minutes until you act, and clears itself the moment you do."
+                        GuardPolicy.Strictness.INSISTENT ->
+                            "Repeats often and vibrates. Below ${GuardPolicy.CRITICAL_LEVEL}% it switches to the alarm sound and ignores Do Not Disturb."
+                    },
+                    color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp,
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("Warn me when the battery is hotter than",
+                color = Cell.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(8.dp))
+            ChoiceChips(
+                listOf(null to "Off", 40f to "40°C", 45f to "45°C", 50f to "50°C"),
+                tempAlert, ::applyTemp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text("Heat ages a cell faster than anything else you control — every extra 10°C roughly doubles the rate.",
+                color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
+
             if (canStop) {
                 Spacer(Modifier.height(10.dp))
                 Text("Root detected — charging stops at the limit by itself.",
                     color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             }
 
-            if ((lowLevel > 0 || target > 0) && !notifsOn) {
+            if (lowLevel > 0 || target > 0 || tempAlert != null) {
+                // Say plainly what the ongoing card is for. Android only lets an app see
+                // every single percentage point while it has one, and a persistent
+                // notification nobody explained reads as an app misbehaving.
                 Spacer(Modifier.height(12.dp))
-                Text("Notifications are off, so these reminders cannot reach you.",
+                Text("Cellspan keeps a small card in your notification shade while any of these are on. That card is what lets it see every single percent, so an alert lands at exactly the level you picked instead of somewhere past it. It also shows your live level, and it uses no measurable power.",
+                    color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
+
+                // Some manufacturers kill background apps on their own schedule, and from
+                // Android 12 an ordinary background job may not restart a foreground
+                // service. Without the battery exemption the guard can therefore be killed
+                // overnight and stay down until the app is next opened — so say so, rather
+                // than letting the user believe their limits are still being watched.
+                if (!unrestrictedBg) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Some phones stop background apps overnight. Allow unrestricted background so Cellspan can start watching again by itself.",
+                        color = Cell.TextSecondary, fontSize = 12.5.sp, lineHeight = 18.sp)
+                    Text("Allow unrestricted background", color = Cell.Accent, fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable { openBatterySettings(ctx, systemSettings) }
+                            .padding(vertical = 15.dp))
+                }
+            }
+
+            if ((lowLevel > 0 || target > 0 || tempAlert != null) && !notifsOn) {
+                Spacer(Modifier.height(12.dp))
+                Text("Notifications are switched off for these alerts, so they cannot reach you.",
                     color = Cell.Bad, fontSize = 12.5.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium)
                 Text("Turn on notifications", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier
@@ -1031,26 +1304,109 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
 }
 
 /**
+ * Largest file the importer will read: 64 MB.
+ *
+ * Ten years of hourly samples exports to a few megabytes, so this is generous for real
+ * data and still far below what would exhaust the heap. The picker has to accept `* / *`
+ * because file managers label JSON inconsistently, which means the user genuinely can
+ * select a video by mistake.
+ */
+private const val MAX_IMPORT_BYTES = 64L * 1024 * 1024
+
+/**
+ * The same budget expressed in characters, for the streaming read. A third of the byte
+ * limit, because a UTF-8 character can occupy up to three bytes in the range JSON uses —
+ * so this can never hold more than MAX_IMPORT_BYTES worth of text in memory.
+ */
+private const val MAX_IMPORT_CHARS = MAX_IMPORT_BYTES / 3
+
+/** The document's size in bytes, or null when the provider does not report one. */
+private fun documentSizeBytes(ctx: android.content.Context, uri: Uri): Long? = runCatching {
+    ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
+        ?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
+        }
+}.getOrNull()
+
+/**
+ * Read at most [limitChars] characters, so a provider that reports no size still cannot
+ * exhaust memory.
+ *
+ * Counted in characters, not bytes, because that is what a Reader yields and what the
+ * StringBuilder actually holds. The two differ for non-ASCII content — a UTF-8 file can be
+ * three times its character count on disk — so the caller passes a character budget that
+ * is deliberately smaller than the byte limit it checks against the provider.
+ */
+private fun java.io.Reader.readAtMost(limitChars: Long): String {
+    val sb = StringBuilder()
+    val buf = CharArray(8192)
+    var total = 0L
+    while (true) {
+        val n = read(buf)
+        if (n < 0) break
+        total += n
+        require(total <= limitChars) { "too large" }
+        sb.appendRange(buf, 0, n)
+    }
+    return sb.toString()
+}
+
+/**
+ * Send the user to the battery-optimisation exemption screen, falling back through the
+ * app's own details page and finally to written directions. Shared by the two places that
+ * need the exemption: hourly sampling and the battery guard's ability to restart itself.
+ */
+private fun openBatterySettings(
+    ctx: android.content.Context,
+    launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
+) {
+    try {
+        launcher.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    } catch (e: Exception) {
+        try {
+            launcher.launch(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", ctx.packageName, null))
+            )
+        } catch (e2: Exception) {
+            Toast.makeText(ctx, "Open Settings > Apps > Cellspan > Battery", Toast.LENGTH_LONG).show()
+        }
+    }
+}
+
+/**
  * A row of level choices, with 0 shown as "Off". Flow, not a Row: at large font scales the
  * last chip would otherwise be squeezed to one character per line and become unpickable.
  */
+@Composable
+private fun LevelChips(options: List<Int>, selected: Int, onPick: (Int) -> Unit) =
+    ChoiceChips(options.map { it to if (it == 0) "Off" else "$it%" }, selected, onPick)
+
+/**
+ * A row of choices of any type.
+ *
+ * `selectable` rather than `clickable`, so TalkBack announces each chip as a radio button
+ * and says which one is chosen; the vertical padding takes the tap target past the 48dp
+ * accessibility minimum, which the old 7dp version missed by a wide margin.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LevelChips(options: List<Int>, selected: Int, onPick: (Int) -> Unit) {
+private fun <T> ChoiceChips(options: List<Pair<T, String>>, selected: T, onPick: (T) -> Unit) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalArrangement = Arrangement.spacedBy(7.dp),
+        modifier = Modifier.selectableGroup(),
     ) {
-        options.forEach { v ->
-            val sel = v == selected
+        options.forEach { (value, label) ->
+            val sel = value == selected
             Box(
                 Modifier.clip(RoundedCornerShape(8.dp))
                     .background(if (sel) Cell.AccentSoft else Cell.SurfaceHi)
                     .border(1.dp, if (sel) Cell.BorderAccent else Cell.Border, RoundedCornerShape(8.dp))
-                    .clickable { onPick(v) }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                    .selectable(selected = sel, role = Role.RadioButton, onClick = { onPick(value) })
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
             ) {
-                Text(if (v == 0) "Off" else "$v%", color = if (sel) Cell.Accent else Cell.TextMuted,
+                Text(label, color = if (sel) Cell.Accent else Cell.TextMuted,
                     fontSize = 12.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal)
             }
         }
@@ -1060,7 +1416,7 @@ private fun LevelChips(options: List<Int>, selected: Int, onPick: (Int) -> Unit)
 /** Lets the user set (or clear) a manual design-capacity override, AccuBattery-style. */
 @Composable
 private fun DesignCapacityDialog(current: Int?, onDismiss: () -> Unit, onSave: (Int?) -> Unit) {
-    var textVal by remember { mutableStateOf(current?.toString() ?: "") }
+    var textVal by rememberSaveable { mutableStateOf(current?.toString() ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Design capacity", fontFamily = Sans, fontWeight = FontWeight.SemiBold) },

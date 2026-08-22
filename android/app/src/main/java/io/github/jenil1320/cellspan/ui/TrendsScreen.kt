@@ -45,7 +45,9 @@ import io.github.jenil1320.cellspan.ui.theme.Sans
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-enum class TrendRange(val label: String, val days: Int) { DAY("Day", 1), WEEK("Week", 7), MONTH("Month", 31) }
+enum class TrendRange(val label: String, val days: Int) {
+    DAY("Day", 1), WEEK("Week", 7), MONTH("Month", 31), YEAR("Year", 365)
+}
 
 private fun dayLabel(key: String): String = try {
     SimpleDateFormat("MMM d", Locale.getDefault())
@@ -57,6 +59,9 @@ private fun dayEpoch(key: String): Long = try {
 } catch (e: Exception) { 0L }
 
 private const val NO_DAILY_HISTORY = "Not enough daily history yet — keep Cellspan around for a few days."
+
+/** Shown when a custom range is set but no day inside it was ever recorded. */
+private const val NO_DATA_IN_RANGE = "No readings in the dates you picked. Cellspan only has days on which the phone was running it."
 
 /**
  * A live series and the instant its x-axis starts from. The origin travels with the
@@ -115,7 +120,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         // Selecting a preset clears any custom range; while custom is active no preset is highlighted.
         RangeToggle(range, active = custom == null) { range = it; custom = null }
 
-        // Custom date range, within the ~31 days of daily history Cellspan keeps.
+        // Custom date range, anywhere inside the daily history Cellspan holds.
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             // The vertical padding sits inside the clickable, so it grows the touch target to ~48dp.
@@ -140,6 +145,9 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
             }
         }
         val xStartDays = window.firstOrNull()?.day?.let { dayLabel(it) } ?: ""
+        // A custom range that came back empty is a different fact from "no history yet",
+        // and saying the wrong one told users with months of data that it had been lost.
+        val emptyDaily = if (custom != null) NO_DATA_IN_RANGE else NO_DAILY_HISTORY
         val xEndDays = if (custom != null) (window.lastOrNull()?.day?.let { dayLabel(it) } ?: "") else "today"
         // Mid x-axis label (shared): the middle of the visible window.
         val dayTsList = socLog.filter { it.timestampMs >= since24 }.map { it.timestampMs }
@@ -160,7 +168,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
             val tp = vitalPoints(window, { it.tempAvg })
             TrendCard("Temperature · daily avg", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
                 xStartDays, xEndDays, xMid = aggMid,
-                emptyMsg = NO_DAILY_HISTORY) {
+                emptyMsg = emptyDaily) {
                 val mins = window.mapNotNull { it.tempMin }
                 val maxs = window.mapNotNull { it.tempMax }
                 if (mins.isNotEmpty() && maxs.isNotEmpty()) {
@@ -187,7 +195,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
             val vp = vitalPoints(window, { it.voltAvg })
             TrendCard("Voltage · daily avg", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
                 xStartDays, xEndDays, xMid = aggMid,
-                emptyMsg = NO_DAILY_HISTORY)
+                emptyMsg = emptyDaily)
         }
 
         // ── Current ─────────────────────────────────────────────────────────────
@@ -204,7 +212,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
             val cp = vitalPoints(window, { it.currAvg?.toFloat() })
             TrendCard("Current · daily avg", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
                 xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
-                emptyMsg = NO_DAILY_HISTORY)
+                emptyMsg = emptyDaily)
         }
 
         // ── Charge cycles ───────────────────────────────────────────────────────

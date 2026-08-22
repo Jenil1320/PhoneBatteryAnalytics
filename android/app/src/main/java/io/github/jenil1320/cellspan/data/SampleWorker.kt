@@ -29,11 +29,18 @@ class SampleWorker(context: Context, params: WorkerParameters) :
                 designOverrideMah = AppPrefs.designOverrideMah(applicationContext),
                 batteryStartMs = AppPrefs.batteryStartMs(applicationContext),
             )
-            val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(snapshot.timestampMs))
+            // Local time, matching the rule the trend queries use in SQL. Without the
+            // explicit zone this quietly followed whatever default the JVM had, so a
+            // reading could land on a different day than the chart that plots it.
+            val day = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                .apply { timeZone = java.util.TimeZone.getDefault() }
+                .format(Date(snapshot.timestampMs))
             // Shared accrual baseline (same one tick()/refresh() use), read and
-            // advanced under one lock so a drop is counted once, never twice.
-            val drop = AccrualCursor.accrue(applicationContext, snapshot.levelPct)
-            if (drop > 0) store.addDischarge(day, drop)
+            // advanced under one lock so a drop is counted once, never twice — and the
+            // write happens inside that lock, so a failure returns the drop to the cursor.
+            AccrualCursor.accrue(applicationContext, snapshot.levelPct) { drop ->
+                runCatching { store.addDischarge(day, drop) }.isSuccess
+            }
             store.ensureDay(day)
             store.insert(snapshot, analysis)
             // Fold this reading into the day's aggregates so week/month trends

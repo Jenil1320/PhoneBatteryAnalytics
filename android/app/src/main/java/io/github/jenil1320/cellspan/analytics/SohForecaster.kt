@@ -41,6 +41,24 @@ object SohForecaster {
     private const val MAX_HORIZON_DAYS = 5 * 365.25
 
     /**
+     * Fractional uncertainty on the measured-versus-model scale factor, used to bracket
+     * the physics-only projection. 25%: the scale is a weighted ratio over a handful of
+     * health points whose own error bars run to several percent, and the model beneath it
+     * carries a documented bias from being fitted to a 2013 cell.
+     */
+    private const val PHYSICS_SCALE_BAND = 0.25
+
+    /**
+     * Minimum span the cycles-per-day rate may be measured over.
+     *
+     * The cycle counter is an integer, so over half a day it typically moves by 0 or 1 —
+     * a 100% quantisation error, and the projected replacement date is directly
+     * proportional to it. Seven days is where that error falls to something a date in
+     * months can survive.
+     */
+    private const val MIN_RATE_SPAN_DAYS = 7.0
+
+    /**
      * @param physicsLossFrac raw (unclamped) model capacity-loss fraction at a given
      *        total cycle count — supplied by the caller from [DegradationModel]. Must be
      *        monotone non-decreasing in cycles.
@@ -115,8 +133,16 @@ object SohForecaster {
         } else {
             fadePerYear = physicsFadePerYear
             eta = etaPhysics
-            lo = null; hi = null
-            curve = physicsCurve(scale ?: 1.0, cyclesNow, cpd, nowMs, eta, physicsLossFrac)
+            // The physics path used to publish a bare date with no range at all, which
+            // read as more certain than the trend path that at least showed a bracket —
+            // exactly backwards, since this branch is taken *because* the data was too
+            // weak to fit. The range comes from the scale factor's own uncertainty:
+            // re-crossing at scale × (1 ± PHYSICS_SCALE_BAND) brackets a wear rate that
+            // is that much faster or slower than measured.
+            val s = scale ?: 1.0
+            lo = physicsCrossMs(s * (1.0 + PHYSICS_SCALE_BAND), cyclesNow, cpd, nowMs, physicsLossFrac)
+            hi = physicsCrossMs(s * (1.0 - PHYSICS_SCALE_BAND), cyclesNow, cpd, nowMs, physicsLossFrac)
+            curve = physicsCurve(s, cyclesNow, cpd, nowMs, eta, physicsLossFrac)
         }
 
         return Forecast(
@@ -161,12 +187,22 @@ object SohForecaster {
         return nowMs + (days * DAY).toLong()
     }
 
+    /**
+     * How many charge cycles this phone accumulates per day.
+     *
+     * The whole replacement date scales linearly with this one number, so the span it is
+     * measured over has to be long enough for the integer cycle counter to have moved
+     * meaningfully. The old floor was half a day, over which the counter moves by 0 or 1
+     * — so a user who happened to complete one cycle in twelve hours was projected at
+     * two cycles a day, roughly double reality, and the date came out roughly half as far
+     * away as it should. [MIN_RATE_SPAN_DAYS] fixes the floor at a week.
+     */
     private fun cyclesPerDay(samples: List<Sample>): Double? {
         if (samples.size < 2) return null
         val s = samples.sortedBy { it.epochMs }
         val days = (s.last().epochMs - s.first().epochMs) / DAY
         val dc = s.last().cycles - s.first().cycles
-        return if (days > 0.5 && dc > 0.0) dc / days else null
+        return if (days >= MIN_RATE_SPAN_DAYS && dc > 0.0) dc / days else null
     }
 
     /** Bisection: date at which scale·lossFn(cycles) crosses the 20% loss line. */
