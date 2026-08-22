@@ -49,6 +49,7 @@ import io.github.jenil1320.cellspan.analytics.Condition
 import io.github.jenil1320.cellspan.analytics.Confidence
 import io.github.jenil1320.cellspan.analytics.DrainForecaster
 import io.github.jenil1320.cellspan.analytics.SohForecaster
+import io.github.jenil1320.cellspan.analytics.ThermalAdvisor
 import io.github.jenil1320.cellspan.data.AppPrefs
 import io.github.jenil1320.cellspan.data.BatterySnapshot
 import io.github.jenil1320.cellspan.data.BatteryGuard
@@ -322,29 +323,51 @@ fun NowScreen(
         val power = BatteryAnalytics.powerWatts(snapshot?.voltageV, snapshot?.currentUa)
         val vR = BatteryAnalytics.voltageReading(snapshot?.voltageV)
         val cR = BatteryAnalytics.currentReading(snapshot?.currentUa, status)
-        val pR = BatteryAnalytics.powerReading(power)
+        val charging = status == "Charging"
+
+        // Battery safety comes first on the screen when there is something to say. A user
+        // whose phone is cooking needs the instruction, not the analytics.
+        val thermal = ThermalAdvisor.advise(snapshot?.temperatureC, charging, power)
+        if (thermal != null) {
+            Spacer(Modifier.height(16.dp))
+            Appear(40) { ThermalCard(thermal, snapshot?.temperatureC) }
+        }
+
+        // One severity fraction per parameter, from the shared scale, so the same colour
+        // means the same distance from trouble on every tile.
+        val sTemp = Severity.temperature(snapshot?.temperatureC)
+        val sVolt = Severity.voltage(snapshot?.voltageV)
+        val sPower = Severity.power(power, charging)
+        val sCurrent = if (charging) 0f else sPower
+
         Spacer(Modifier.height(20.dp))
         Appear(80) {
             Column {
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     VitalTile("Temperature", snapshot?.temperatureC?.let { String.format(Locale.US, "%.1f°C", it) } ?: "—", band.label,
-                        Modifier.weight(1f).fillMaxHeight(), accent = tempColor(band),
-                        metric = Metric.TEMPERATURE,
-                        gauge = snapshot?.temperatureC?.let { (it / 45f).coerceIn(0f, 1f) })
+                        Modifier.weight(1f).fillMaxHeight(), accent = Severity.color(sTemp),
+                        metric = Metric.TEMPERATURE, severity = sTemp,
+                        gauge = snapshot?.temperatureC?.let { (it / 55f).coerceIn(0f, 1f) })
                     VitalTile("Voltage", snapshot?.voltageV?.let { String.format(Locale.US, "%.2f V", it) } ?: "—", vR.note,
-                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(vR.level),
-                        metric = Metric.VOLTAGE,
-                        gauge = snapshot?.voltageV?.let { ((it - 3.0f) / 1.45f).coerceIn(0f, 1f) })
+                        Modifier.weight(1f).fillMaxHeight(), accent = Severity.color(sVolt),
+                        metric = Metric.VOLTAGE, severity = sVolt,
+                        gauge = snapshot?.voltageV?.let { ((it - 3.0f) / 1.50f).coerceIn(0f, 1f) })
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     VitalTile("Current", snapshot?.currentUa?.let { "${kotlin.math.abs(it / 1000)} mA" } ?: "—", cR.note,
-                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(cR.level),
-                        metric = Metric.CURRENT,
+                        Modifier.weight(1f).fillMaxHeight(),
+                        // While charging a big current is the charger working, not a
+                        // problem, so the tile stays on the brand colour rather than
+                        // shading toward red for doing exactly what the user wanted.
+                        accent = if (charging) Cell.Accent else Severity.color(sCurrent),
+                        metric = Metric.CURRENT, severity = sCurrent,
                         gauge = snapshot?.currentUa?.let { (kotlin.math.abs(it / 1000f) / 2500f).coerceIn(0f, 1f) })
-                    VitalTile("Power", power?.let { String.format(Locale.US, "%.1f W", it) } ?: "—", pR.note,
-                        Modifier.weight(1f).fillMaxHeight(), accent = levelColor(pR.level),
-                        metric = Metric.POWER,
+                    VitalTile("Power", power?.let { String.format(Locale.US, "%.1f W", it) } ?: "—",
+                        if (charging) "Charging" else BatteryAnalytics.powerReading(power).note,
+                        Modifier.weight(1f).fillMaxHeight(),
+                        accent = if (charging) Cell.Accent else Severity.color(sPower),
+                        metric = Metric.POWER, severity = sPower,
                         gauge = power?.let { (kotlin.math.abs(it).toFloat() / 12f).coerceIn(0f, 1f) })
                 }
             }
@@ -402,6 +425,51 @@ fun NowScreen(
         Appear(240) { ScreenDrainCard(screenSplit, guardRunning) }
 
         Spacer(Modifier.height(80.dp))
+    }
+}
+
+/**
+ * The battery-safety card: what is wrong, why it matters, and what to do about it.
+ *
+ * Shown only when there is something to act on, and placed above the analytics — a user
+ * whose phone is at 52°C needs the instruction, not the charts. The advice is ordered by
+ * how much each action actually removes rather than by how easy it is, so "unplug" comes
+ * before "take the case off".
+ */
+@Composable
+private fun ThermalCard(advice: ThermalAdvisor.Advice, tempC: Float?) {
+    val urgent = advice.level >= ThermalAdvisor.Level.HOT
+    val tint = if (urgent) Cell.Bad else Cell.Warn
+    Box(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(tint.copy(alpha = 0.10f))
+            .border(1.dp, tint.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+            .padding(16.dp),
+    ) {
+        Column {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(advice.headline, color = tint, fontFamily = Sans, fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                tempC?.let {
+                    Text(String.format(Locale.US, "%.0f°C", it), color = tint,
+                        fontFamily = Mono, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            advice.actions.forEach { action ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    Text("→", color = tint, fontFamily = Mono, fontSize = 13.sp)
+                    Text(action, color = Cell.TextPrimary, fontSize = 13.5.sp, lineHeight = 19.sp)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(advice.why, color = Cell.TextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+        }
     }
 }
 
@@ -1123,6 +1191,9 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
         BatteryGuard.sync(ctx)
     }
     var unrestrictedBg by remember { mutableStateOf(SampleScheduler.isUnrestricted(ctx)) }
+    // The phone's own charge limit. On a Pixel this is a real hardware stop at 80% that
+    // Cellspan can flip directly once WRITE_SECURE_SETTINGS is granted over ADB.
+    var sysState by remember { mutableStateOf(SystemChargeLimit.state(ctx)) }
     val systemSettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         unrestrictedBg = SampleScheduler.isUnrestricted(ctx)
         BatteryGuard.sync(ctx)
@@ -1285,19 +1356,27 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
             }
 
             if (!canStop) {
-                // Without root only the phone itself can truly cap a charge.
-                Spacer(Modifier.height(6.dp))
-                Text("Use the phone's own charging limit", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clickable {
-                            try {
-                                systemSettings.launch(SystemChargeLimit.settingsIntent())
-                            } catch (e: Exception) {
-                                Toast.makeText(ctx, "Open Settings > Battery", Toast.LENGTH_LONG).show()
+                Spacer(Modifier.height(14.dp))
+                SystemLimitSection(sysState, target) { on ->
+                    if (SystemChargeLimit.setOn(ctx, on)) {
+                        sysState = SystemChargeLimit.state(ctx)
+                    } else {
+                        Toast.makeText(ctx, "The phone refused that change", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                run {
+                    Text("Open the phone's battery settings", color = Cell.Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clickable {
+                                try {
+                                    systemSettings.launch(SystemChargeLimit.settingsIntent())
+                                } catch (e: Exception) {
+                                    Toast.makeText(ctx, "Open Settings > Battery", Toast.LENGTH_LONG).show()
+                                }
                             }
-                        }
-                        // Padding after clickable, so the tap target reaches 48dp.
-                        .padding(vertical = 15.dp))
+                            // Padding after clickable, so the tap target reaches 48dp.
+                            .padding(vertical = 15.dp))
+                }
             }
         }
     }
@@ -1350,6 +1429,99 @@ private fun java.io.Reader.readAtMost(limitChars: Long): String {
     }
     return sb.toString()
 }
+
+/**
+ * The phone's own charge limit — the only thing on an unrooted device that genuinely stops
+ * a charge instead of asking the user to.
+ *
+ * Four states, and the wording has to be honest about which one applies, because the
+ * difference between "your phone will stop at 80%" and "we will remind you at 80%" is the
+ * whole point of the feature.
+ */
+@Composable
+private fun SystemLimitSection(
+    state: SystemChargeLimit.State,
+    target: Int,
+    onSet: (Boolean) -> Unit,
+) {
+    val ctx = LocalContext.current
+    // The platform switch is fixed at 80%. Offering it while the user's target is 90 would
+    // be promising something it cannot do.
+    val targetMatches = target == SystemChargeLimit.SYSTEM_LIMIT_PCT
+
+    when (state) {
+        SystemChargeLimit.State.ON_WRITABLE,
+        SystemChargeLimit.State.OFF_WRITABLE,
+        SystemChargeLimit.State.UNKNOWN_WRITABLE -> {
+            val on = state == SystemChargeLimit.State.ON_WRITABLE
+            val neverSet = state == SystemChargeLimit.State.UNKNOWN_WRITABLE
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Really stop charging at 80%",
+                        color = if (on) Cell.Accent else Cell.TextSecondary, fontSize = 13.sp,
+                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium)
+                    Text(
+                        when {
+                            on -> "Your phone's own charge limit is on, so the charge genuinely stops. The reminder above stays as a check."
+                            !targetMatches -> "Your phone can stop the charge, but only at 80%. Set the limit above to 80% to use it."
+                            neverSet -> "Switches on your phone's own charge limit — a real stop, not a reminder. Cellspan has not set this yet, so check your phone's own screen if you think it is already on."
+                            else -> "Switches on your phone's own charge limit — a real stop, not a reminder."
+                        },
+                        color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Switch(checked = on, enabled = on || targetMatches,
+                    onCheckedChange = { onSet(it) }, colors = cellSwitchColors())
+            }
+            Spacer(Modifier.height(8.dp))
+            // Honesty about the one thing the platform will not allow. Android refuses to
+            // let an ordinary app READ this key even with the permission that lets it
+            // write, so the switch reflects what Cellspan last set, not what the phone
+            // currently says. Where the two could differ, the phone wins, and the user is
+            // told where to look.
+            Text("Cellspan can set this but Android will not let it read the value back, so the switch shows what Cellspan last set. Settings › Battery › Battery health › Charging optimization is the final word.",
+                color = Cell.TextFaint, fontSize = 11.5.sp, lineHeight = 17.sp)
+        }
+
+        SystemChargeLimit.State.NOT_PERMITTED -> {
+            Text("Your phone can stop the charge at 80% by itself. Cellspan can switch that on for you, but only after one ADB command — Android has no in-app prompt for this permission.",
+                color = Cell.TextSecondary, fontSize = 12.5.sp, lineHeight = 18.sp)
+            Spacer(Modifier.height(8.dp))
+            Text("Run this once from a computer, then reopen Cellspan:",
+                color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
+            Spacer(Modifier.height(6.dp))
+            val cmd = SystemChargeLimit.grantCommand(ctx)
+            Box(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                    .background(Cell.SurfaceHi)
+                    .border(1.dp, Cell.Border, RoundedCornerShape(8.dp))
+                    .clickable {
+                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("adb", cmd))
+                        Toast.makeText(ctx, "Command copied", Toast.LENGTH_SHORT).show()
+                    }
+                    .padding(12.dp),
+            ) {
+                Text(cmd, color = Cell.TextSecondary, fontFamily = Mono, fontSize = 10.5.sp, lineHeight = 16.sp)
+            }
+            Text("Tap to copy. It grants one permission and nothing else, and it survives reboots. You can always set the limit by hand instead:",
+                color = Cell.TextFaint, fontSize = 11.5.sp, lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+    }
+}
+
+@Composable
+private fun cellSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor = Cell.Surface,
+    checkedTrackColor = Cell.Accent,
+    uncheckedThumbColor = Cell.TextFaint,
+    uncheckedTrackColor = Cell.Track,
+    uncheckedBorderColor = Cell.Border,
+)
 
 /**
  * Send the user to the battery-optimisation exemption screen, falling back through the

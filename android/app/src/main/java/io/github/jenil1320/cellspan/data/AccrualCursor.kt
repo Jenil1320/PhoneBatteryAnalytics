@@ -38,10 +38,30 @@ object AccrualCursor {
      * was concerned it had already been counted, and the day's usage total was quietly
      * short by however much the phone had discharged in that window.
      */
+    /**
+     * Largest single-step drop that is believed to be real usage.
+     *
+     * A fuel gauge does not only report discharge. It also **recalibrates** — after a deep
+     * discharge, after a firmware update, or when its own capacity estimate is corrected —
+     * and when it does, the reported level can jump by tens of points in one reading. That
+     * is a change of opinion about the same charge, not charge that was consumed.
+     *
+     * Booking it as usage put impossible numbers on screen: a day showing "156% discharged
+     * · 1.56 cycles" from a single jump, and a cliff in the charge-today chart that made
+     * the rest of the day unreadable. Twenty-five points is comfortably above any genuine
+     * gap between two samples — the hourly worker would need a 25%/hour drain to reach it,
+     * and the foreground tick runs every sixty seconds — while still catching the jumps.
+     */
+    private const val MAX_PLAUSIBLE_DROP = 25
+
     @Synchronized
     fun accrue(context: Context, level: Int, commit: (Double) -> Boolean = { true }): Double {
         val prev = get(context)
-        val drop = if (prev != null && level < prev) (prev - level).toDouble() else 0.0
+        val raw = if (prev != null && level < prev) prev - level else 0
+        // A jump this large is the gauge recalibrating, not the phone using power. The
+        // cursor still moves to the new level — that IS the battery's state now — but the
+        // step is not charged to the user's daily usage.
+        val drop = if (raw in 1..MAX_PLAUSIBLE_DROP) raw.toDouble() else 0.0
         set(context, level)
         if (drop > 0.0 && !commit(drop)) {
             // Put the cursor back where it was so the drop is not lost.

@@ -14,6 +14,7 @@ import android.os.PowerManager
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import io.github.jenil1320.cellspan.analytics.ScreenDrainAccumulator
+import io.github.jenil1320.cellspan.analytics.ThermalAdvisor
 import java.util.Locale
 
 /**
@@ -226,8 +227,15 @@ class BatteryGuardService : Service() {
                 BatteryGuardNotifications.postBand(this, d.kind, level, target, d.audible)
             }
         }
-        if (d.tempAlert && tempC != null && cfg.tempAlertC != null) {
-            BatteryGuardNotifications.postHeat(this, tempC, cfg.tempAlertC)
+        if (d.tempAlert && tempC != null) {
+            // The advice, not just the number. What to do about heat depends on what is
+            // making it, and the service knows whether the phone is on a charger.
+            val advice = ThermalAdvisor.advise(tempC, plugged)
+            if (advice != null) {
+                BatteryGuardNotifications.postHeat(
+                    this, tempC, advice.headline, advice.actions, advice.why,
+                )
+            }
         }
 
         recordScreenDrain(level, plugged)

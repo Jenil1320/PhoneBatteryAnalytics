@@ -35,6 +35,20 @@
     <uses-permission android:name="android.permission.BATTERY_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Lets Cellspan switch the phone's OWN charge limit on, which on a Pixel is
+         Settings > Battery > Battery health > Charging optimization > "Limit to 80%".
+         That is a real hardware charge stop; no app-level trick can do the same.
+
+         Like BATTERY_STATS above, the protection level is
+         signature|privileged|**development**, so an ordinary install never has it and the
+         app falls back to a reminder — but the "development" flag means it CAN be granted
+         once over ADB with no root, and the grant survives reboots:
+           adb shell pm grant io.github.jenil1320.cellspan android.permission.WRITE_SECURE_SETTINGS
+         Reading the setting needs no permission, so the UI can always show the true state
+         and never claims a cap that is not there. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- See launchable apps so their names resolve (avoids QUERY_ALL_PACKAGES). -->
     <queries>
         <intent>

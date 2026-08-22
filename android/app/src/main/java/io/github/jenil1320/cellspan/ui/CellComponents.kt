@@ -95,6 +95,12 @@ fun VitalTile(
     bg: Color = Cell.Surface,
     metric: Metric,
     gauge: Float? = null,
+    /**
+     * How close this parameter is to its limit, 0..1. Drives the gradient on the gauge, so
+     * a tile visibly warms up as its value approaches trouble instead of switching colour
+     * only once it has arrived.
+     */
+    severity: Float? = null,
 ) {
     Box(
         modifier
@@ -116,7 +122,7 @@ fun VitalTile(
                     fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 3.dp))
             }
             if (gauge != null) {
-                MetricGauge(gauge, accent, Modifier.padding(top = 10.dp))
+                MetricGauge(gauge, accent, Modifier.padding(top = 10.dp), severity = severity)
             }
         }
     }

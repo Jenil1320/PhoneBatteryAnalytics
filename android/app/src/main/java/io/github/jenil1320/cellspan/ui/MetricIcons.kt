@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -118,9 +119,29 @@ private fun DrawScope.strokePath(vararg pts: Pair<Float, Float>): Path = Path().
  * the reading sits within its normal span.
  */
 @Composable
-fun MetricGauge(fraction: Float, color: Color, modifier: Modifier = Modifier) {
+fun MetricGauge(
+    fraction: Float,
+    color: Color,
+    modifier: Modifier = Modifier,
+    /**
+     * When supplied, the bar is painted as a gradient that runs from the safe colour up to
+     * [color], instead of a flat fill. That turns the bar itself into the warning: a value
+     * on its way to trouble shows amber creeping in along its length before it ever
+     * reaches red, rather than staying green and then switching all at once.
+     */
+    severity: Float? = null,
+) {
     val f = fraction.coerceIn(0f, 1f)
     Box(modifier.fillMaxWidth().height(5.dp).clip(CircleShape).background(Cell.Track)) {
-        Box(Modifier.fillMaxWidth(f).height(5.dp).clip(CircleShape).background(color))
+        val fill: Modifier = if (severity != null && severity > 0.02f) {
+            Modifier.background(
+                Brush.horizontalGradient(
+                    listOf(androidx.compose.ui.graphics.lerp(Cell.Good, color, 0.35f), color)
+                )
+            )
+        } else {
+            Modifier.background(color)
+        }
+        Box(Modifier.fillMaxWidth(f).height(5.dp).clip(CircleShape).then(fill))
     }
 }

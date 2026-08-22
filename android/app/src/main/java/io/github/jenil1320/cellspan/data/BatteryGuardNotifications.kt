@@ -5,8 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -21,9 +19,10 @@ import io.github.jenil1320.cellspan.R
  *  - [CHANNEL_STATUS] — the silent, ongoing foreground-service card that keeps the guard
  *    alive and doubles as a glanceable readout.
  *  - [CHANNEL_BAND] — reaching either end of the charge band.
- *  - [CHANNEL_CRITICAL] — about to shut down. Alarm sound, alarm audio stream, and it
- *    bypasses Do Not Disturb, because at that point silence is the wrong answer.
- *  - [CHANNEL_HEAT] — the cell is running hot.
+ *  - [CHANNEL_CRITICAL] — about to shut down. Its own channel so the user can tune it
+ *    separately, but the ordinary notification sound: urgency is carried by how often it
+ *    repeats, not by volume.
+ *  - [CHANNEL_HEAT] — the cell is hot enough to damage it.
  */
 object BatteryGuardNotifications {
 
@@ -54,8 +53,6 @@ object BatteryGuardNotifications {
     const val ID_BAND = 4201
     const val ID_HEAT = 4203
 
-    /** Two short pulses then a long one — distinct from a message, hard to mistake. */
-    private val BUZZ = longArrayOf(0, 220, 140, 220, 140, 620)
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -74,30 +71,29 @@ object BatteryGuardNotifications {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_BAND, "Charge reminders", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Tells you the moment the battery reaches either end of your chosen band."
+                // The phone's normal notification vibration and sound. No custom pattern:
+                // a battery reminder is not more important than the user's other
+                // notifications and should not feel different from them.
                 enableVibration(true)
-                vibrationPattern = BUZZ
             }
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_CRITICAL, "Critical battery", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Fires when the phone is minutes from shutting down."
+                // Deliberately the ordinary notification sound and vibration, not an alarm.
+                //
+                // An earlier version used the alarm stream and bypassed Do Not Disturb, on
+                // the reasoning that a reminder nobody hears has failed. That reasoning is
+                // wrong for this app: a low battery is not an emergency, and an alarm tone
+                // at full volume during a meeting or at night is a far worse outcome than a
+                // phone that shuts down. Urgency is carried by how often the reminder
+                // repeats and by IMPORTANCE_HIGH putting it on screen — not by volume.
                 enableVibration(true)
-                vibrationPattern = BUZZ
-                // The alarm stream and a DND bypass, because a reminder the user cannot
-                // hear at 4% has failed at the only job it had.
-                setSound(
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build(),
-                )
-                setBypassDnd(true)
             }
         )
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_HEAT, "Overheat warning", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Warns you when the battery is running hot enough to age it faster."
+            NotificationChannel(CHANNEL_HEAT, "Battery temperature", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Warns you when the battery is hot enough to damage it, and says what to do."
                 enableVibration(true)
             }
         )
@@ -181,6 +177,8 @@ object BatteryGuardNotifications {
             GuardPolicy.AlertKind.OVERHEAT ->
                 "Battery hot" to "Let the phone cool down."
         }
+        // Category, not sound: CATEGORY_ALARM on a channel with no alarm tone still tells
+        // the system this matters, without making the phone shout.
 
         val n = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
@@ -224,20 +222,36 @@ object BatteryGuardNotifications {
         }
     }
 
-    fun postHeat(context: Context, tempC: Float, limitC: Float) {
+    /**
+     * The heat warning, carrying the same advice the Now screen shows.
+     *
+     * A bare "battery hot" tells the user nothing they cannot already feel. The value is in
+     * the instruction, so the notification expands to the ranked action list from
+     * [io.github.jenil1320.cellspan.analytics.ThermalAdvisor] — and the first action is the
+     * one that removes the most heat, which while charging is always to unplug.
+     */
+    fun postHeat(
+        context: Context,
+        tempC: Float,
+        headline: String,
+        actions: List<String>,
+        why: String,
+    ) {
         if (!canReach(context, CHANNEL_HEAT)) return
+        val body = buildString {
+            actions.forEach { append("• ").append(it).append('\n') }
+            append('\n').append(why)
+        }
         val n = NotificationCompat.Builder(context, CHANNEL_HEAT)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
-            .setContentTitle(String.format(java.util.Locale.US, "Battery at %.0f°C", tempC))
-            .setContentText(
-                String.format(
-                    java.util.Locale.US,
-                    "Above your %.0f°C limit. Unplug, close heavy apps or move out of the sun — heat is the fastest way to age a cell.",
-                    limitC,
-                )
-            )
-            .setStyle(NotificationCompat.BigTextStyle())
+            .setContentTitle(String.format(java.util.Locale.US, "%s — %.0f°C", headline, tempC))
+            .setContentText(actions.firstOrNull() ?: why)
+            // BigTextStyle, so the whole list is readable without opening the app. A user
+            // acting on this is usually holding a hot phone and wants the answer now.
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // Category only. The channel uses the ordinary notification sound — this is a
+            // warning worth seeing, not an alarm worth waking someone for.
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
             .setContentIntent(openApp(context, 2))
