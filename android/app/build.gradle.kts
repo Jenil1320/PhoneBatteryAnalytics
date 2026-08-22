@@ -41,6 +41,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // A different package id, so a debug build installs ALONGSIDE the release one
+            // rather than replacing it. Without this, testing anything on a real phone
+            // meant overwriting the install that holds months of battery history — and the
+            // fresh-install path (a database created from scratch rather than migrated)
+            // could not be exercised at all without destroying that history first.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            resValue("string", "app_name", "Cellspan debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

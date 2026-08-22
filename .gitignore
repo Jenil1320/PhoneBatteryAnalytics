@@ -32,3 +32,6 @@ keystore.properties
 # Raw batterystats dumps (personal)
 desktop/bstats.txt
 desktop/*.txt
+
+# Shareable build artefacts — rebuilt on demand, never committed.
+dist/
