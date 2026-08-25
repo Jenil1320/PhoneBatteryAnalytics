@@ -19,34 +19,37 @@ import io.github.jenil1320.cellspan.R
  *  - [CHANNEL_STATUS] — the silent, ongoing foreground-service card that keeps the guard
  *    alive and doubles as a glanceable readout.
  *  - [CHANNEL_BAND] — reaching either end of the charge band.
- *  - [CHANNEL_CRITICAL] — about to shut down. Its own channel so the user can tune it
- *    separately, but the ordinary notification sound: urgency is carried by how often it
- *    repeats, not by volume.
+ *  - [CHANNEL_CRITICAL] — about to shut down. Its own channel so the user can silence it
+ *    separately from the ordinary band reminder.
  *  - [CHANNEL_HEAT] — the cell is hot enough to damage it.
+ *
+ * None of them makes a sound. They vibrate. See [silentVibration].
  */
 object BatteryGuardNotifications {
 
     const val CHANNEL_STATUS = "guard_status"
 
     /**
-     * A NEW id, deliberately, not the `charge_alarm` the deleted alarm classes used.
+     * Channel ids carry a version suffix, and it is bumped whenever their SOUND or
+     * VIBRATION has to change.
      *
-     * Once a channel exists, `createNotificationChannel` may only change its name,
+     * Once a channel exists, `createNotificationChannel` may only update its name,
      * description and group. Importance, sound, lights and vibration are silently ignored
-     * — the platform protects whatever the user has (or has not) chosen. Reusing the old
-     * id therefore looked like it preserved people's settings, but what it actually did
-     * was throw away every property of the reworked reminder for exactly the users who
-     * had the old app: no IMPORTANCE_HIGH, no vibration, no buzz pattern, and no way for
-     * the code to detect the difference. Fresh installs would have behaved one way and
-     * upgrades another.
+     * from then on — the platform protects whatever the user has, or has not, chosen. So
+     * switching these alerts to vibrate-only could not reach anyone who already had the
+     * app: their channels would keep the sound they were created with, and no code could
+     * detect the difference. A new id is the only way to change them, and the old ones are
+     * deleted so nobody ends up with two entries for the same thing.
      */
-    const val CHANNEL_BAND = "guard_band"
+    const val CHANNEL_BAND = "guard_band_v2"
+    const val CHANNEL_CRITICAL = "guard_critical_v2"
+    const val CHANNEL_HEAT = "guard_heat_v2"
 
-    /** The id the deleted ChargeAlarm/LowBatteryAlarm used; removed on first run. */
-    private val LEGACY_CHANNELS = listOf("charge_alarm", "low_battery_alarm")
-
-    const val CHANNEL_CRITICAL = "guard_critical"
-    const val CHANNEL_HEAT = "guard_heat"
+    /** Every id this app has ever used for these alerts, removed on first run. */
+    private val LEGACY_CHANNELS = listOf(
+        "charge_alarm", "low_battery_alarm",          // the deleted ChargeAlarm/LowBatteryAlarm
+        "guard_band", "guard_critical", "guard_heat", // v1 of the guard, created with sound
+    )
 
     /** The foreground-service card. Its ID is fixed by the service contract. */
     const val ID_STATUS = 4200
@@ -71,32 +74,40 @@ object BatteryGuardNotifications {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_BAND, "Charge reminders", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Tells you the moment the battery reaches either end of your chosen band."
-                // The phone's normal notification vibration and sound. No custom pattern:
-                // a battery reminder is not more important than the user's other
-                // notifications and should not feel different from them.
-                enableVibration(true)
+                silentVibration()
             }
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_CRITICAL, "Critical battery", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Fires when the phone is minutes from shutting down."
-                // Deliberately the ordinary notification sound and vibration, not an alarm.
-                //
-                // An earlier version used the alarm stream and bypassed Do Not Disturb, on
-                // the reasoning that a reminder nobody hears has failed. That reasoning is
-                // wrong for this app: a low battery is not an emergency, and an alarm tone
-                // at full volume during a meeting or at night is a far worse outcome than a
-                // phone that shuts down. Urgency is carried by how often the reminder
-                // repeats and by IMPORTANCE_HIGH putting it on screen — not by volume.
-                enableVibration(true)
+                silentVibration()
             }
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_HEAT, "Battery temperature", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Warns you when the battery is hot enough to damage it, and says what to do."
-                enableVibration(true)
+                silentVibration()
             }
         )
+    }
+
+    /**
+     * Vibrate, never make a sound.
+     *
+     * `setSound(null, null)` is the only way to silence a channel — a notification built
+     * without a sound still plays the user's default tone, because the channel supplies it
+     * on Android 8 and above. None of these alerts is worth a noise: a battery reminder is
+     * not more urgent than the messages the user already gets, and one that chimes during
+     * a meeting or at night is the reason apps get muted. A vibration is enough to notice
+     * and impossible to resent.
+     *
+     * Set once here so no channel can be added later that quietly makes a sound.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.O)
+    private fun NotificationChannel.silentVibration() {
+        setSound(null, null)
+        enableVibration(true)
+        enableLights(false)
     }
 
     /**
@@ -156,12 +167,19 @@ object BatteryGuardNotifications {
      * @param audible false re-posts the same reminder silently so the level stays current
      *        without buzzing on every one-point change.
      */
+    /**
+     * @param dismissible true for a "tell me once" alert. It has to be swipeable, because
+     *        the guard stands down straight after posting it and there will be nothing
+     *        left running to take it away. A repeating alert stays pinned instead, since
+     *        the service is still there to clear it the moment the user acts.
+     */
     fun postBand(
         context: Context,
         kind: GuardPolicy.AlertKind,
         level: Int,
         target: Int,
         audible: Boolean,
+        dismissible: Boolean = false,
     ) {
         val critical = kind == GuardPolicy.AlertKind.CRITICAL
         val channel = if (critical) CHANNEL_CRITICAL else CHANNEL_BAND
@@ -185,12 +203,14 @@ object BatteryGuardNotifications {
             .setContentTitle(title)
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(if (critical) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
-            // Pinned while the condition holds. The service clears it on the first reading
-            // that no longer breaches the band, so unlike the old polling loop there is no
-            // path that can strand an un-swipeable notification.
-            .setOngoing(true)
-            .setAutoCancel(false)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            // Vibrate only, on every posting as well as on the channel: a channel created
+            // by an older build keeps whatever sound it had, and the platform will not let
+            // us change it afterwards.
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE)
+            .setSound(null)
+            .setOngoing(!dismissible)
+            .setAutoCancel(dismissible)
             // setSilent on a repeat: the shade stays accurate, the phone stays quiet.
             .setSilent(!audible)
             .setOnlyAlertOnce(!audible)
@@ -250,9 +270,9 @@ object BatteryGuardNotifications {
             // acting on this is usually holding a hot phone and wants the answer now.
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            // Category only. The channel uses the ordinary notification sound — this is a
-            // warning worth seeing, not an alarm worth waking someone for.
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setDefaults(NotificationCompat.DEFAULT_VIBRATE)
+            .setSound(null)
             .setAutoCancel(true)
             .setContentIntent(openApp(context, 2))
             .build()

@@ -188,7 +188,12 @@ private fun SessionCard(s: Session) {
                 mah?.let { Text("${if (it >= 0) "+" else ""}$it mAh", color = accent, fontFamily = Mono, fontSize = 12.sp) }
             }
             // Where in the 0–100% range the session moved.
-            Row(Modifier.fillMaxWidth().height(5.dp).padding(top = 8.dp).clip(RoundedCornerShape(3.dp)).background(Cell.Track)) {
+            Row(// padding BEFORE height: the other order measures the content with
+                // maxHeight = 5dp - 8dp, which the platform coerces to zero, so the track,
+                // the accent segment and the whole bar drew into nothing and were invisible
+                // on every session card.
+                Modifier.fillMaxWidth().padding(top = 8.dp).height(5.dp)
+                    .clip(RoundedCornerShape(3.dp)).background(Cell.Track)) {
                 if (lo > 0) Box(Modifier.weight(lo.toFloat()))
                 Box(Modifier.weight((hi - lo).coerceAtLeast(1).toFloat()).fillMaxHeight().background(accent))
                 if (hi < 100) Box(Modifier.weight((100 - hi).toFloat()))

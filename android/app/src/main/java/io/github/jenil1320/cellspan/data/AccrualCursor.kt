@@ -22,6 +22,19 @@ object AccrualCursor {
             .putInt(KEY, level.coerceIn(0, 100)).apply()
     }
 
+    /** When the cursor last moved. Absent (0) means "no window", handled by the floor. */
+    private fun lastAt(context: Context): Long {
+        val at = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_AT, 0L)
+        // A missing or future timestamp gives no usable window; fall back to the floor by
+        // returning "now", which the caller's coerceAtLeast then widens.
+        return if (at <= 0L || at > System.currentTimeMillis()) System.currentTimeMillis() else at
+    }
+
+    private fun setLastAt(context: Context, ms: Long) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_AT, ms).apply()
+    }
+
     /**
      * Advance the cursor to [level] and return the drop that was consumed (0.0
      * when the level did not fall, or when there is no previous value). This is
@@ -52,17 +65,36 @@ object AccrualCursor {
      * gap between two samples — the hourly worker would need a 25%/hour drain to reach it,
      * and the foreground tick runs every sixty seconds — while still catching the jumps.
      */
-    private const val MAX_PLAUSIBLE_DROP = 25
+    private const val MAX_DROP_PER_HOUR = 25.0
+
+    /**
+     * Floor on the elapsed window, so a burst of readings seconds apart still allows a
+     * point or two rather than rejecting everything outright.
+     */
+    private const val MIN_WINDOW_HOURS = 0.25
+
+    /** When the cursor last moved, so a drop can be judged as a rate. */
+    private const val KEY_AT = "accrual_at"
 
     @Synchronized
     fun accrue(context: Context, level: Int, commit: (Double) -> Boolean = { true }): Double {
         val prev = get(context)
-        val raw = if (prev != null && level < prev) prev - level else 0
-        // A jump this large is the gauge recalibrating, not the phone using power. The
-        // cursor still moves to the new level — that IS the battery's state now — but the
-        // step is not charged to the user's daily usage.
-        val drop = if (raw in 1..MAX_PLAUSIBLE_DROP) raw.toDouble() else 0.0
+        val now = System.currentTimeMillis()
+        val raw = if (prev != null && level < prev) (prev - level).toDouble() else 0.0
+        // Bound the drop by a plausible RATE, not by a fixed number of points.
+        //
+        // A flat 25-point ceiling threw the whole step away, and that lost real usage: the
+        // phone sits in Doze from 23:00 at 100%, the next sample runs at 07:00 at 60%, and
+        // all forty points vanished from the day's total with no way to recover them —
+        // the cursor had already moved on. Judging by rate keeps both cases right. A gauge
+        // recalibration arrives seconds after the previous reading, so its implied rate is
+        // absurd and it is still rejected; an eight-hour gap is allowed its full forty
+        // points because 5 points an hour is perfectly ordinary.
+        val hours = ((now - lastAt(context)) / 3_600_000.0).coerceAtLeast(MIN_WINDOW_HOURS)
+        val ceiling = hours * MAX_DROP_PER_HOUR
+        val drop = if (raw > 0.0 && raw <= ceiling) raw else 0.0
         set(context, level)
+        setLastAt(context, now)
         if (drop > 0.0 && !commit(drop)) {
             // Put the cursor back where it was so the drop is not lost.
             if (prev != null) set(context, prev) else clear(context)

@@ -13,7 +13,10 @@ class ForecasterTest {
 
     private val now = 1_800_000_000_000L
     private val day = 86_400_000L
-    private val physics = { c: Double -> DegradationModel.cyclicLossFrac(c, 4355) }
+    // The callback now also receives the battery age that goes with those cycles, so the
+    // calendar term can be evaluated on the same axis the dates are computed from. These
+    // tests exercise the cyclic term alone, so the age is ignored here.
+    private val physics = { c: Double, _: Double -> DegradationModel.cyclicLossFrac(c, 4355) }
 
     // ── SoH forecaster ─────────────────────────────────────────────────────────
     @Test

@@ -37,11 +37,14 @@ class PowerReceiver : BroadcastReceiver() {
                     // silently refuses to charge is the one failure this feature cannot have.
                     ChargeControl.releaseIfEngaged(app)
                 }
-                // Best-effort heal. A plug event is NOT one of the broadcasts that exempt
+                // Nothing to clear: the cable moving changes the episode key on its own,
+                // so the guard is free to start again without this receiver having to
+                // remember to reset anything.
+                // Best-effort start. A plug event is NOT one of the broadcasts that exempt
                 // an app from the Android 12+ background foreground-service restriction, so
                 // this succeeds only where the app already holds an exemption (the
                 // battery-optimisation allowlist) or the app happens to be visible. It costs
-                // nothing to try, and it is one of several paths — MainActivity heals on
+                // nothing to try, and it is one of several paths — MainActivity starts it on
                 // every foreground, and BootReceiver uses a genuinely exempt broadcast.
                 BatteryGuard.ensureRunning(app)
             } catch (e: Exception) {
@@ -56,13 +59,25 @@ class PowerReceiver : BroadcastReceiver() {
                 // Close the current charge/discharge segment into a History session, then
                 // open the opposite one. Works even without the fuel-gauge charge counter
                 // (the mAh delta is just left unknown).
-                SegmentTracker.current(app)?.let { seg ->
-                    val delta = if (cc != null && seg.startCc != null) cc - seg.startCc else null
-                    HistoryStore(app).use {
-                        it.recordSession(seg.startTs, nowTs, seg.startLevel, snap.levelPct, delta, seg.isCharge)
+                // Closing the old segment is best-effort; STARTING the new one is not.
+                //
+                // These used to share one try block, so a database hiccup while closing
+                // skipped the begin() below and left the previous segment marked open. The
+                // next plug event then closed *that* stale segment instead, writing a row
+                // whose kind said "discharge" while its level had gone up — and the real
+                // session in between was never recorded at all.
+                try {
+                    SegmentTracker.current(app)?.let { seg ->
+                        val delta = if (cc != null && seg.startCc != null) cc - seg.startCc else null
+                        HistoryStore(app).use {
+                            it.recordSession(seg.startTs, nowTs, seg.startLevel, snap.levelPct, delta, seg.isCharge)
+                        }
                     }
+                } catch (e: Exception) {
+                    // Losing one history row is survivable; losing the segment boundary is not.
+                } finally {
+                    SegmentTracker.begin(app, nowTs, snap.levelPct, cc, nowCharging)
                 }
-                SegmentTracker.begin(app, nowTs, snap.levelPct, cc, nowCharging)
 
                 // Session-based capacity measurement (needs the fuel-gauge charge counter).
                 when (action) {

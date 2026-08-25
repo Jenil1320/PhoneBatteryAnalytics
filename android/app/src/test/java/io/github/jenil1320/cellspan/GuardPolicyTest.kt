@@ -22,7 +22,8 @@ import org.junit.Test
  */
 class GuardPolicyTest {
 
-    private val band = Config(lowTarget = 20, highTarget = 80, strictness = Strictness.PERSISTENT, tempAlertC = null)
+    private val band = Config(lowTarget = 20, highTarget = 80, strictness = Strictness.GENTLE, tempAlertC = null)
+    private val repeating = band.copy(strictness = Strictness.PERSISTENT)
     private val t0 = 1_700_000_000_000L
 
     // ── the reported bug ──────────────────────────────────────────────────────
@@ -85,21 +86,29 @@ class GuardPolicyTest {
     }
 
     @Test
-    fun criticalIgnoresTheUsersStrictnessChoice() {
-        // A single gentle chime is not a proportionate response to a phone at 3%.
-        val gentle = GuardPolicy.repeatMs(AlertKind.CRITICAL, Strictness.GENTLE)
-        val insistent = GuardPolicy.repeatMs(AlertKind.CRITICAL, Strictness.INSISTENT)
-        assertEquals(gentle, insistent)
-        assertTrue(gentle < 5 * 60_000L)
+    fun criticalRespectsTheUsersStrictnessChoice() {
+        // "Tell me once" means once, even at 3%. Overriding it was paternalistic: the usual
+        // reason someone has not plugged in is that they cannot, and a phone that keeps
+        // buzzing at them about it is exactly how an app gets muted for good.
+        assertEquals(Long.MAX_VALUE, GuardPolicy.repeatMs(AlertKind.CRITICAL, Strictness.GENTLE))
+        assertTrue(GuardPolicy.repeatMs(AlertKind.CRITICAL, Strictness.INSISTENT) < 5 * 60_000L)
+    }
+
+    @Test
+    fun tellMeOnceNeverRepeatsForAnyAlert() {
+        for (k in AlertKind.entries) {
+            if (k == AlertKind.OVERHEAT) continue    // heat has its own re-alert window
+            assertEquals("$k repeats on GENTLE", Long.MAX_VALUE, GuardPolicy.repeatMs(k, Strictness.GENTLE))
+        }
     }
 
     @Test
     fun escalatingFromPlugInToCriticalAlertsImmediately() {
         var s = State()
-        var d = GuardPolicy.evaluate(band, Reading(20, false, null), s, t0)
+        var d = GuardPolicy.evaluate(repeating, Reading(20, false, null), s, t0)
         assertTrue(d.audible); s = d.state
         // One minute later, well inside the persistent repeat gap, but now critical.
-        d = GuardPolicy.evaluate(band, Reading(4, false, null), s, t0 + 60_000)
+        d = GuardPolicy.evaluate(repeating, Reading(4, false, null), s, t0 + 60_000)
         assertEquals(AlertKind.CRITICAL, d.kind)
         assertTrue("a change of alert always speaks", d.audible)
     }
@@ -108,7 +117,7 @@ class GuardPolicyTest {
 
     @Test
     fun gentleAlertsOnceAndThenStaysQuiet() {
-        val cfg = band.copy(strictness = Strictness.GENTLE)
+        val cfg = band
         var s = State()
         var d = GuardPolicy.evaluate(cfg, Reading(80, true, null), s, t0)
         assertTrue(d.audible); s = d.state
@@ -121,13 +130,13 @@ class GuardPolicyTest {
     @Test
     fun persistentRepeatsOnlyAfterItsInterval() {
         var s = State()
-        var d = GuardPolicy.evaluate(band, Reading(80, true, null), s, t0)
+        var d = GuardPolicy.evaluate(repeating, Reading(80, true, null), s, t0)
         assertTrue(d.audible); s = d.state
         // Every one-percent tick in between must be silent, or the phone buzzes constantly.
-        d = GuardPolicy.evaluate(band, Reading(81, true, null), s, t0 + 60_000)
+        d = GuardPolicy.evaluate(repeating, Reading(81, true, null), s, t0 + 60_000)
         assertFalse(d.audible); s = d.state
-        d = GuardPolicy.evaluate(band, Reading(82, true, null), s, t0 + 6 * 60_000)
-        assertTrue("due after five minutes", d.audible)
+        d = GuardPolicy.evaluate(repeating, Reading(82, true, null), s, t0 + 11 * 60_000)
+        assertTrue("due after the unplug interval", d.audible)
     }
 
     @Test
@@ -142,14 +151,14 @@ class GuardPolicyTest {
     fun resolvingResetsTheRepeatBudget() {
         var s = State()
         repeat(4) { i ->
-            s = GuardPolicy.evaluate(band, Reading(80 + i, true, null), s, t0 + i * 6L * 60_000).state
+            s = GuardPolicy.evaluate(repeating, Reading(80 + i, true, null), s, t0 + i * 11L * 60_000).state
         }
         assertTrue(s.audibleCount > 1)
-        s = GuardPolicy.evaluate(band, Reading(70, false, null), s, t0 + 60 * 60_000).state
+        s = GuardPolicy.evaluate(repeating, Reading(70, false, null), s, t0 + 60 * 60_000).state
         assertEquals(0, s.audibleCount)
         assertNull(s.activeKind)
         // The next breach starts fresh rather than inheriting a spent budget.
-        val d = GuardPolicy.evaluate(band, Reading(20, false, null), s, t0 + 90 * 60_000)
+        val d = GuardPolicy.evaluate(repeating, Reading(20, false, null), s, t0 + 90 * 60_000)
         assertTrue(d.audible)
     }
 
@@ -164,7 +173,7 @@ class GuardPolicyTest {
         var t = t0
         while (s.audibleCount < GuardPolicy.MAX_AUDIBLE_REPEATS) {
             s = GuardPolicy.evaluate(cfg, Reading(20, false, null), s, t).state
-            t += 4 * 60_000
+            t += 6 * 60_000
         }
         assertEquals(GuardPolicy.MAX_AUDIBLE_REPEATS, s.audibleCount)
         val d = GuardPolicy.evaluate(cfg, Reading(4, false, null), s, t)
@@ -173,17 +182,18 @@ class GuardPolicyTest {
     }
 
     @Test
-    fun criticalKeepsSoundingEvenIndefinitely() {
-        // Once critical, the cap does not apply at all: the phone is minutes from dying.
-        val cfg = band.copy(strictness = Strictness.PERSISTENT)
+    fun theRepeatBudgetStillBoundsTheLoudestSetting() {
+        // Even on the loudest setting the phone must eventually stop buzzing, or what the
+        // user silences is the app rather than the alert.
+        val cfg = band.copy(strictness = Strictness.INSISTENT)
         var s = State()
         var audible = 0
-        for (i in 0 until 60) {
-            val d = GuardPolicy.evaluate(cfg, Reading(3, false, null), s, t0 + i * 3L * 60_000)
+        for (i in 0 until 200) {
+            val d = GuardPolicy.evaluate(cfg, Reading(3, false, null), s, t0 + i * 6L * 60_000)
             if (d.audible) audible++
             s = d.state
         }
-        assertTrue("expected many critical alerts, got $audible", audible > GuardPolicy.MAX_AUDIBLE_REPEATS)
+        assertEquals(GuardPolicy.MAX_AUDIBLE_REPEATS, audible)
     }
 
     @Test
@@ -192,11 +202,11 @@ class GuardPolicyTest {
         // already UNPLUG, so `changed` is false and only the repeat interval can speak.
         val restored = State(activeKind = AlertKind.UNPLUG, lastAlertMs = t0, audibleCount = 3)
         // Inside the interval: silent, but still pinned.
-        val soon = GuardPolicy.evaluate(band, Reading(85, true, null), restored, t0 + 60_000)
+        val soon = GuardPolicy.evaluate(repeating, Reading(85, true, null), restored, t0 + 60_000)
         assertEquals(AlertKind.UNPLUG, soon.kind)
         assertFalse(soon.audible)
         // Past it: speaks again.
-        val later = GuardPolicy.evaluate(band, Reading(85, true, null), restored, t0 + 6 * 60_000)
+        val later = GuardPolicy.evaluate(repeating, Reading(85, true, null), restored, t0 + 11 * 60_000)
         assertTrue(later.audible)
     }
 
@@ -215,13 +225,13 @@ class GuardPolicyTest {
         var audible = 0
         // Ten hours of an unplug reminder being ignored.
         for (i in 0 until 200) {
-            val d = GuardPolicy.evaluate(band, Reading(85, true, null), s, t0 + i * 6L * 60_000)
+            val d = GuardPolicy.evaluate(repeating, Reading(85, true, null), s, t0 + i * 11L * 60_000)
             if (d.audible) audible++
             s = d.state
         }
         assertEquals(GuardPolicy.MAX_AUDIBLE_REPEATS, audible)
         // Still pinned though — the condition has not gone away.
-        assertEquals(AlertKind.UNPLUG, GuardPolicy.evaluate(band, Reading(85, true, null), s, t0 + 99_999_999).kind)
+        assertEquals(AlertKind.UNPLUG, GuardPolicy.evaluate(repeating, Reading(85, true, null), s, t0 + 99_999_999).kind)
     }
 
     // ── temperature ───────────────────────────────────────────────────────────
@@ -267,6 +277,103 @@ class GuardPolicyTest {
     @Test
     fun heatAlertIsSilentWhenTurnedOff() {
         assertFalse(GuardPolicy.evaluate(band, Reading(50, false, 60f), State(), t0).tempAlert)
+    }
+
+    // ── when the guard runs at all ─────────────────────────────────────────────
+
+    @Test
+    fun theGuardDoesNotWatchWhenNothingIsNear() {
+        // The whole point of the change: at 70% on battery with a 20% target, nothing can
+        // happen for hours, so there must be no service and no card in the shade.
+        assertFalse(GuardPolicy.shouldWatch(band, Reading(70, false, null), deliveredFor = null))
+        assertFalse(GuardPolicy.shouldWatch(band, Reading(36, false, null), deliveredFor = null))
+    }
+
+    @Test
+    fun theGuardStartsWatchingOnceTheLowTargetIsInReach() {
+        assertTrue(GuardPolicy.shouldWatch(band, Reading(35, false, null), deliveredFor = null))
+        assertTrue(GuardPolicy.shouldWatch(band, Reading(21, false, null), deliveredFor = null))
+    }
+
+    @Test
+    fun theGuardWatchesTheWholeChargeBecauseChargingIsFast() {
+        // A 65 W charger crosses ten points in under three minutes, so there is no useful
+        // margin to wait for — once the cable is in, watch all the way up.
+        assertTrue(GuardPolicy.shouldWatch(band, Reading(5, true, null), deliveredFor = null))
+        assertTrue(GuardPolicy.shouldWatch(band, Reading(79, true, null), deliveredFor = null))
+    }
+
+    @Test
+    fun pluggingInAlreadyAboveTheTargetStillWarns() {
+        // The moment the reminder is MOST useful. Requiring the level to be below the
+        // target first meant the guard never started for this user, so they were never
+        // told at all — they simply left it on the charger at 95%.
+        assertTrue(GuardPolicy.shouldWatch(band, Reading(95, true, null), deliveredFor = null))
+        assertEquals(AlertKind.UNPLUG, GuardPolicy.kindFor(band, Reading(95, true, null)))
+    }
+
+    @Test
+    fun theGuardStandsDownOnceTheReminderHasBeenGiven() {
+        // Not the level that stops it — the delivered reminder does, one reading later.
+        assertFalse(GuardPolicy.shouldWatch(band, Reading(80, true, null), deliveredFor = GuardPolicy.episodeKey(band, Reading(50, true, null))))
+        assertFalse(GuardPolicy.shouldWatch(band, Reading(20, false, null), deliveredFor = null))
+    }
+
+    @Test
+    fun aStaleKeyDoesNotSilenceTheGuardForEver() {
+        // The failure this pins shut: a plain "already done" flag could only be cleared by
+        // code that was running, and the flag's whole purpose was to stop the guard
+        // running. One plug event missed while the app was asleep left it stuck, and no
+        // reminder ever fired again at any level. A key from a DIFFERENT situation simply
+        // stops matching, so the guard wakes up on its own.
+        val unpluggedKey = GuardPolicy.episodeKey(band, Reading(30, false, null))
+        assertTrue("a key from the other cable state must not silence this one",
+            GuardPolicy.shouldWatch(band, Reading(60, true, null), deliveredFor = unpluggedKey))
+        // And moving a target changes the key too.
+        val moved = band.copy(highTarget = 90)
+        assertTrue(GuardPolicy.shouldWatch(moved, Reading(60, true, null),
+            deliveredFor = GuardPolicy.episodeKey(band, Reading(60, true, null))))
+    }
+
+    @Test
+    fun aDeliveredReminderStopsTheGuardEvenMidCharge() {
+        assertFalse(GuardPolicy.shouldWatch(band, Reading(50, true, null), deliveredFor = GuardPolicy.episodeKey(band, Reading(50, true, null))))
+        assertFalse(GuardPolicy.shouldWatch(band, Reading(25, false, null),
+            deliveredFor = GuardPolicy.episodeKey(band, Reading(25, false, null))))
+    }
+
+    @Test
+    fun anEndTurnedOffIsNeverWatched() {
+        val lowOnly = band.copy(highTarget = 0)
+        assertFalse(GuardPolicy.shouldWatch(lowOnly, Reading(50, true, null), deliveredFor = null))
+        val highOnly = band.copy(lowTarget = 0)
+        assertFalse(GuardPolicy.shouldWatch(highOnly, Reading(25, false, null), deliveredFor = null))
+    }
+
+    // ── heat is evaluated without disturbing the band ──────────────────────────
+
+    @Test
+    fun evaluateHeatLeavesTheBandStateAlone() {
+        // The hourly worker uses this. If it went through evaluate() it would rewrite the
+        // band fields and could mark a reminder as already given without ever posting one.
+        val hotCfg = band.copy(tempAlertC = 45f)
+        val mid = State(activeKind = AlertKind.UNPLUG, lastAlertMs = t0, audibleCount = 4)
+        val d = GuardPolicy.evaluateHeat(hotCfg, Reading(90, true, 48f), mid, t0 + 60_000)
+        assertTrue("heat should fire", d.tempAlert)
+        assertEquals("band alert must be untouched", AlertKind.UNPLUG, d.state.activeKind)
+        assertEquals("repeat clock must be untouched", t0, d.state.lastAlertMs)
+        assertEquals("repeat budget must be untouched", 4, d.state.audibleCount)
+        assertFalse("heat never makes the band audible", d.audible)
+    }
+
+    @Test
+    fun evaluateHeatSharesTheHysteresisWithTheService() {
+        val hotCfg = band.copy(tempAlertC = 45f)
+        val first = GuardPolicy.evaluateHeat(hotCfg, Reading(50, false, 47f), State(), t0)
+        assertTrue(first.tempAlert)
+        // A second check a minute later must not warn again about the same episode.
+        val second = GuardPolicy.evaluateHeat(hotCfg, Reading(50, false, 48f), first.state, t0 + 60_000)
+        assertFalse(second.tempAlert)
     }
 
     // ── edge cases ────────────────────────────────────────────────────────────

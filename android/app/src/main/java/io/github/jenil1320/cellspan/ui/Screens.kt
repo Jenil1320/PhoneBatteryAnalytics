@@ -502,22 +502,25 @@ private fun ScreenDrainCard(split: HistoryStore.ScreenSplit?, guardRunning: Bool
             }
             EnduranceRow("Screen on", on?.let { String.format(Locale.US, "%.1f%% / h", it) } ?: "—", Cell.Warn)
             EnduranceRow("Screen off", off?.let { String.format(Locale.US, "%.1f%% / h", it) } ?: "—", Cell.Good)
-            if (on != null && off != null && off > 0.05) {
+            // The high-idle case is tested FIRST. When it was second it was unreachable,
+            // because the ratio branch fired for any off-rate above 0.05 — so a phone being
+            // held awake in the background (screen-on 0.4%/h, screen-off 1.2%/h) got
+            // "your screen costs about 0 times what the phone uses asleep" instead of the
+            // warning written for exactly that case.
+            if (off != null && off > 2.0) {
+                Spacer(Modifier.height(8.dp))
+                Text("That is high for a sleeping phone — something is keeping it awake. Check Settings > Battery for an app using power in the background.",
+                    color = Cell.Warn, fontSize = 12.sp, lineHeight = 18.sp)
+            } else if (on != null && off != null && off > 0.05 && on / off >= 1.5) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     String.format(
                         Locale.US,
-                        "Your screen costs about %.0f times what the phone uses asleep. Last 7 days.",
+                        "Your screen costs about %.1f times what the phone uses asleep. Last 7 days.",
                         on / off,
                     ),
                     color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp,
                 )
-            } else if (off != null && off > 2.0) {
-                // A phone should sit near 1%/h asleep. Several times that is a real,
-                // fixable problem and worth naming rather than just plotting.
-                Spacer(Modifier.height(8.dp))
-                Text("That is high for a sleeping phone — something is keeping it awake. Check Settings > Battery for an app using power in the background.",
-                    color = Cell.Warn, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }
@@ -1275,9 +1278,9 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
                 Spacer(Modifier.height(8.dp))
                 ChoiceChips(
                     listOf(
-                        GuardPolicy.Strictness.GENTLE to "Once",
-                        GuardPolicy.Strictness.PERSISTENT to "Keep asking",
-                        GuardPolicy.Strictness.INSISTENT to "Insistent",
+                        GuardPolicy.Strictness.GENTLE to "Tell me once",
+                        GuardPolicy.Strictness.PERSISTENT to "Remind me again",
+                        GuardPolicy.Strictness.INSISTENT to "Keep at it",
                     ),
                     strictness, ::applyStrictness,
                 )
@@ -1285,14 +1288,17 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
                 Text(
                     when (strictness) {
                         GuardPolicy.Strictness.GENTLE ->
-                            "One alert, then the reminder waits quietly in the shade."
+                            "One vibration, once. Cellspan then gets out of the way — it assumes you may not have a charger to hand."
                         GuardPolicy.Strictness.PERSISTENT ->
-                            "Repeats every few minutes until you act, and clears itself the moment you do."
+                            "Repeats every ten to fifteen minutes until you act, and stops the moment you do."
                         GuardPolicy.Strictness.INSISTENT ->
-                            "Repeats often and vibrates. Below ${GuardPolicy.CRITICAL_LEVEL}% it switches to the alarm sound and ignores Do Not Disturb."
+                            "Repeats every few minutes until you act. Choose this only if you regularly miss the first one."
                     },
                     color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp,
                 )
+                Spacer(Modifier.height(6.dp))
+                Text("Reminders vibrate. None of them makes a sound.",
+                    color = Cell.TextFaint, fontSize = 11.5.sp, lineHeight = 17.sp)
             }
 
             Spacer(Modifier.height(16.dp))
@@ -1304,7 +1310,7 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
                 tempAlert, ::applyTemp,
             )
             Spacer(Modifier.height(8.dp))
-            Text("Heat ages a cell faster than anything else you control — every extra 10°C roughly doubles the rate.",
+            Text("Heat ages a cell faster than anything else you control — every extra 10°C roughly doubles the rate. Checked instantly while charging, and about once an hour otherwise.",
                 color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
 
             if (canStop) {
@@ -1318,7 +1324,7 @@ private fun BatteryLifeSaverCard(plugged: Boolean) {
                 // every single percentage point while it has one, and a persistent
                 // notification nobody explained reads as an app misbehaving.
                 Spacer(Modifier.height(12.dp))
-                Text("Cellspan keeps a small card in your notification shade while any of these are on. That card is what lets it see every single percent, so an alert lands at exactly the level you picked instead of somewhere past it. It also shows your live level, and it uses no measurable power.",
+                Text("Near a limit, Cellspan puts a small card in your notification shade — while charging, or once the battery is within ${GuardPolicy.WATCH_MARGIN_PCT} points of your low reminder. That card is what lets it see every single percent, so the alert lands on exactly the level you picked. It goes away again as soon as it has told you.",
                     color = Cell.TextMuted, fontSize = 12.sp, lineHeight = 18.sp)
 
                 // Some manufacturers kill background apps on their own schedule, and from

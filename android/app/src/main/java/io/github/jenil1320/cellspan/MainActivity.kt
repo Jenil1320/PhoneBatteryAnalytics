@@ -126,7 +126,16 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
             // temperature moves, so the orb tracks the phone in real time. The 60s tick
             // stays as the persistence beat — the broadcast itself writes nothing.
             val live = object : BroadcastReceiver() {
-                override fun onReceive(c: Context?, i: Intent?) { vm.liveUpdate() }
+                override fun onReceive(c: Context?, i: Intent?) {
+                    vm.liveUpdate()
+                    // Also the moment to start the guard if a threshold has just come into
+                    // range — plugging in, or the level drifting down to the low reminder,
+                    // while the app happens to be open. ensureRunning returns immediately
+                    // when there is nothing to watch, so this costs nothing on the vast
+                    // majority of broadcasts, and starting a foreground service is always
+                    // permitted while the app is visible.
+                    runCatching { BatteryGuard.ensureRunning(ctx) }
+                }
             }
             ContextCompat.registerReceiver(
                 ctx, live, IntentFilter(Intent.ACTION_BATTERY_CHANGED),

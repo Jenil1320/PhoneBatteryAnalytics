@@ -119,8 +119,21 @@ class PhysicsTest {
     fun aCorrectMicroampReadingIsLeftAlone() {
         assertEquals(1_500_000L, BatteryReader.normaliseCurrentUa(1_500_000L, "Charging"))
         assertEquals(-250_000L, BatteryReader.normaliseCurrentUa(-250_000L, "Discharging"))
-        // Just above the suspicion ceiling: a genuine 6 mA idle draw stays 6 mA.
-        assertEquals(6_000L, BatteryReader.normaliseCurrentUa(6_000L, "Charging"))
+    }
+
+    @Test
+    fun theSuspicionCeilingMeetsTheProofThresholdWithNoGap() {
+        // These two used to sit at 5 mA and 20 mA, leaving everything between them neither
+        // scaled nor able to settle the device's unit. A 30 W charge on a milliamp-bug ROM
+        // reports raw 6 800 and landed in that hole, so the app called it "Trickle".
+        //
+        // The cost of closing the gap is that an UNPROVEN device charging at a genuine
+        // 6 mA is scaled wrongly for one reading. That is close to unreachable: any real
+        // charge passes 20 mA within seconds, which proves the unit permanently, and a
+        // phone that has never once exceeded 20 mA is not a phone that is charging.
+        assertEquals(6_800_000L, BatteryReader.normaliseCurrentUa(6_800L, "Charging"))
+        // Once proven, the same reading is left exactly as it came.
+        assertEquals(6_800L, BatteryReader.normaliseCurrentUa(6_800L, "Charging", unitsKnownMicro = true))
     }
 
     @Test

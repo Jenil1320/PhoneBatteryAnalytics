@@ -144,11 +144,27 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
                 dailyVitals.filter { dayEpoch(it.day) >= cutoff }
             }
         }
+        // The first day that actually has a value for a given metric, not just the first
+        // day in the window: vitalPoints drops days whose selector is null, so a boundary
+        // day missing that one metric made the axis name a day the chart does not plot.
+        fun startLabel(sel: (DailyVital) -> Any?): String =
+            window.firstOrNull { sel(it) != null }?.day?.let { dayLabel(it) } ?: ""
         val xStartDays = window.firstOrNull()?.day?.let { dayLabel(it) } ?: ""
         // A custom range that came back empty is a different fact from "no history yet",
         // and saying the wrong one told users with months of data that it had been lost.
         val emptyDaily = if (custom != null) NO_DATA_IN_RANGE else NO_DAILY_HISTORY
-        val xEndDays = if (custom != null) (window.lastOrNull()?.day?.let { dayLabel(it) } ?: "") else "today"
+        // "today" only when the newest plotted day really IS today. Hard-coding it meant a
+        // phone that had recorded nothing for a few days still labelled the right-hand edge
+        // "today", so the reader took a stale temperature for the current one.
+        val lastDay = window.lastOrNull()?.day
+        val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            .apply { timeZone = java.util.TimeZone.getDefault() }
+            .format(java.util.Date())
+        val xEndDays = when {
+            custom != null -> lastDay?.let { dayLabel(it) } ?: ""
+            lastDay == null || lastDay == todayKey -> "today"
+            else -> dayLabel(lastDay)
+        }
         // Mid x-axis label (shared): the middle of the visible window.
         val dayTsList = socLog.filter { it.timestampMs >= since24 }.map { it.timestampMs }
         val dayMid = if (dayTsList.size >= 2) Fmt.time((dayTsList.min() + dayTsList.max()) / 2) else ""
@@ -167,7 +183,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         } else {
             val tp = vitalPoints(window, { it.tempAvg })
             TrendCard("Temperature · daily avg", tp, { String.format(Locale.US, "%.0f°C", it) }, Cell.Cool,
-                xStartDays, xEndDays, xMid = aggMid,
+                startLabel { it.tempAvg }, xEndDays, xMid = aggMid,
                 emptyMsg = emptyDaily) {
                 val mins = window.mapNotNull { it.tempMin }
                 val maxs = window.mapNotNull { it.tempMax }
@@ -194,7 +210,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         } else {
             val vp = vitalPoints(window, { it.voltAvg })
             TrendCard("Voltage · daily avg", vp, { String.format(Locale.US, "%.2f V", it) }, Cell.Accent,
-                xStartDays, xEndDays, xMid = aggMid,
+                startLabel { it.voltAvg }, xEndDays, xMid = aggMid,
                 emptyMsg = emptyDaily)
         }
 
@@ -211,7 +227,7 @@ fun TrendsScreen(socLog: List<SocPoint>, dailyVitals: List<DailyVital>, dailyUsa
         } else {
             val cp = vitalPoints(window, { it.currAvg?.toFloat() })
             TrendCard("Current · daily avg", cp, { "${it.toInt()} mA" }, Cell.AccentBright,
-                xStartDays, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
+                startLabel { it.currAvg }, xEndDays, xMid = aggMid, threshold = 0f, thresholdLabel = "0 mA", thresholdColor = Cell.TextMuted,
                 emptyMsg = emptyDaily)
         }
 

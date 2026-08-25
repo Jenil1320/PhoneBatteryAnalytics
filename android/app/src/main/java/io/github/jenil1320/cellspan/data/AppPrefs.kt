@@ -65,13 +65,42 @@ object AppPrefs {
     // ── Battery guard ─────────────────────────────────────────────────────────
 
     /**
-     * How hard the band reminders push. PERSISTENT by default: a single chime that arrives
-     * while the phone is in a pocket is the same as no reminder at all, which is the
-     * failure the guard exists to prevent.
+     * How hard the band reminders push. GENTLE — tell me once — is the default.
+     *
+     * Repeating assumes the user is ignoring the reminder. Far more often they simply
+     * cannot act: no charger to hand, driving, in a meeting. A phone that buzzes every few
+     * minutes at someone who has no charger is not being helpful, and the thing they turn
+     * off is the app.
      */
-    fun strictness(c: Context): GuardPolicy.Strictness =
-        runCatching { GuardPolicy.Strictness.valueOf(p(c).getString(STRICTNESS, null) ?: "") }
-            .getOrDefault(GuardPolicy.Strictness.PERSISTENT)
+    fun strictness(c: Context): GuardPolicy.Strictness {
+        migrateStrictnessOnce(c)
+        return runCatching { GuardPolicy.Strictness.valueOf(p(c).getString(STRICTNESS, null) ?: "") }
+            .getOrDefault(GuardPolicy.Strictness.GENTLE)
+    }
+
+    private const val STRICTNESS_MIGRATED = "alert_strictness_migrated"
+
+    /**
+     * Move existing installs off the old repeating default, exactly once.
+     *
+     * Changing a default only helps new users: anyone who already had the app has
+     * PERSISTENT written to preferences from when that was the default, so they would keep
+     * being nagged every ten minutes and would have no idea why the release notes claimed
+     * otherwise. This rewrites that one value, and only that one — an INSISTENT setting is
+     * a deliberate choice and is left alone, and once the flag is set a user who later
+     * picks PERSISTENT on purpose keeps it.
+     */
+    private fun migrateStrictnessOnce(c: Context) {
+        val prefs = p(c)
+        if (prefs.getBoolean(STRICTNESS_MIGRATED, false)) return
+        val stored = prefs.getString(STRICTNESS, null)
+        prefs.edit().apply {
+            if (stored == GuardPolicy.Strictness.PERSISTENT.name) {
+                putString(STRICTNESS, GuardPolicy.Strictness.GENTLE.name)
+            }
+            putBoolean(STRICTNESS_MIGRATED, true)
+        }.apply()
+    }
 
     fun setStrictness(c: Context, s: GuardPolicy.Strictness) =
         p(c).edit().putString(STRICTNESS, s.name).apply()
@@ -89,9 +118,30 @@ object AppPrefs {
     fun setTempAlertC(c: Context, v: Float?) =
         p(c).edit().putFloat(TEMP_ALERT, v ?: 0f).apply()
 
-    /** True when either end of the band, or the heat alert, is armed — i.e. the guard has a job. */
+    /** True when either end of the band is armed. */
     fun guardArmed(c: Context): Boolean =
-        chargeAlarmTarget(c) > 0 || lowBatteryAlert(c) > 0 || tempAlertC(c) != null
+        chargeAlarmTarget(c) > 0 || lowBatteryAlert(c) > 0
+
+    private const val DELIVERED_FOR = "guard_delivered_for"
+
+    /**
+     * Which situation the last reminder was delivered for, as an opaque key.
+     *
+     * This is what lets the guard shut itself down instead of sitting in the notification
+     * shade once its work is finished — and, just as importantly, what lets it start again
+     * without anything having to remember to reset it.
+     *
+     * It replaced a plain "already done" boolean, which was a trap. That flag could only be
+     * cleared by code that was running, and the whole point of the flag was to stop the
+     * guard running; a plug event missed while the app was asleep therefore left it stuck
+     * true, and the reminder never fired again on any level. Comparing a key describing the
+     * *current* situation against the one that was last announced has no such state to go
+     * stale: the moment the cable moves or the user changes a target, the keys differ and
+     * the episode is new.
+     */
+    fun deliveredFor(c: Context): String? = p(c).getString(DELIVERED_FOR, null)
+    fun setDeliveredFor(c: Context, key: String?) =
+        p(c).edit().putString(DELIVERED_FOR, key).apply()
 
     /** The guard's live state, persisted so a service restart does not re-alert immediately. */
     fun guardState(c: Context): GuardPolicy.State {

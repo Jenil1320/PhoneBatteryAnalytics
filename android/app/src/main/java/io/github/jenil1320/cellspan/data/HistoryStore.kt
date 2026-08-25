@@ -199,10 +199,17 @@ class HistoryStore(context: Context) :
         val out = ArrayList<HistoryPoint>()
         readableDatabase.rawQuery(
             "SELECT ts, soh, cycles, quality FROM (" +
-                "SELECT MAX(ts) AS ts, AVG(soh) AS soh, MAX(cycles) AS cycles, " +
-                // MAX, not AVG: a day that produced even one real measurement should not
-                // have its weight dragged down by the estimates around it.
-                "MAX(quality) AS quality " +
+                // A quality-WEIGHTED mean, with MAX(quality) as the weight of the result.
+                //
+                // A plain AVG(soh) with MAX(quality) described two different populations: a
+                // day holding one session measurement at 89% and twenty live estimates
+                // averaging 78% produced the value 78.5 labelled with the session's 0.85
+                // weight, so the forecaster trusted a number that was almost entirely
+                // estimate. Weighting the mean by the same column that labels it makes the
+                // two consistent — the measurement dominates the value it vouches for.
+                "SELECT MAX(ts) AS ts, " +
+                "SUM(soh * COALESCE(quality, 0.25)) / SUM(COALESCE(quality, 0.25)) AS soh, " +
+                "MAX(cycles) AS cycles, MAX(quality) AS quality " +
                 "FROM samples GROUP BY date(ts/1000,'unixepoch','localtime') " +
                 "ORDER BY ts DESC LIMIT ?) ORDER BY ts ASC",
             arrayOf(days.toString())

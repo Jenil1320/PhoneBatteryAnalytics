@@ -9,6 +9,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import android.content.IntentFilter
 import java.util.concurrent.TimeUnit
 
 /**
@@ -34,6 +35,8 @@ object BatteryGuard {
         val app = context.applicationContext
         val armed = AppPrefs.guardArmed(app)
         val intent = Intent(app, BatteryGuardService::class.java)
+        // No flag to reset. A changed target changes the episode key by itself, so the
+        // previous "already told them" stops matching without anyone clearing it.
         if (!armed) {
             runCatching { app.stopService(intent) }
             BatteryGuardNotifications.cancelBand(app)
@@ -44,12 +47,66 @@ object BatteryGuard {
         start(app, intent)
     }
 
-    /** Start the service if it is not already up. Never throws. */
+    /**
+     * Start the service only if it has something to watch right now. Never throws.
+     *
+     * The "right now" is the point. Starting whenever a reminder is merely *armed* meant
+     * the card sat in the notification shade permanently, including at 70% on battery with
+     * a 20% target — five hours before anything could possibly happen. It now starts when a
+     * threshold is actually within reach and stands down once the reminder has been given.
+     */
     fun ensureRunning(context: Context) {
         val app = context.applicationContext
-        if (!AppPrefs.guardArmed(app)) return
+        if (!needsWatching(app)) return
         if (isRunning(app)) return
         start(app, Intent(app, BatteryGuardService::class.java))
+    }
+
+    /**
+     * Read the "already told them" key, clearing it the moment the situation has moved on.
+     *
+     * The key alone is not enough, because it repeats: deliver at "plugged, 80" and the
+     * very next charge produces the same key, so the guard would decide it had already
+     * spoken and stay asleep for good. Consuming it on the first reading that does NOT
+     * match turns it into a one-shot — unplugging clears it, and the next plug-in starts
+     * clean.
+     */
+    fun effectiveDeliveredKey(context: Context, currentKey: String): String? {
+        val app = context.applicationContext
+        val stored = AppPrefs.deliveredFor(app) ?: return null
+        if (stored == currentKey) return stored
+        AppPrefs.setDeliveredFor(app, null)
+        return null
+    }
+
+    /**
+     * Whether a threshold is close enough to be worth watching for.
+     *
+     * Reads the sticky battery broadcast rather than [BatteryReader], because callers
+     * include a broadcast receiver and the main thread, and this must stay cheap.
+     */
+    fun needsWatching(context: Context): Boolean {
+        val app = context.applicationContext
+        if (!AppPrefs.guardArmed(app)) return false
+        val sticky = runCatching {
+            app.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }.getOrNull() ?: return false
+        val raw = sticky.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+        val scale = sticky.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+        if (raw < 0 || scale <= 0) return false
+        val reading = GuardPolicy.Reading(
+            levelPct = (raw * 100 / scale).coerceIn(0, 100),
+            pluggedIn = sticky.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0,
+            temperatureC = null,
+        )
+        val cfg = GuardPolicy.Config(
+            lowTarget = AppPrefs.lowBatteryAlert(app),
+            highTarget = AppPrefs.chargeAlarmTarget(app),
+            strictness = AppPrefs.strictness(app),
+            tempAlertC = AppPrefs.tempAlertC(app),
+        )
+        val key = GuardPolicy.episodeKey(cfg, reading)
+        return GuardPolicy.shouldWatch(cfg, reading, effectiveDeliveredKey(app, key))
     }
 
     private fun start(app: Context, intent: Intent) {

@@ -152,8 +152,16 @@ object BatteryReader {
     /** A magnitude at or above this can only be microamps, so it settles the device's unit. */
     const val MICRO_PROOF_UA = 20_000L
 
-    /** Readings below this (5 mA expressed in µA) are suspected of being milliamps. */
-    private const val MA_SUSPICION_CEILING = 5_000L
+    /**
+     * Readings below this are suspected of being milliamps.
+     *
+     * Deliberately equal to [MICRO_PROOF_UA], so the two tests meet with no gap. They used
+     * to sit at 5 000 and 20 000, which left everything in between neither scaled nor
+     * treated as proof: on a milliamp-bug ROM a 30 W charge reports raw 6 800, so it was
+     * published as 6.8 mA, and the app called a fast charge "Trickle" while the same
+     * phone's smaller discharge readings were corrected properly.
+     */
+    private const val MA_SUSPICION_CEILING = MICRO_PROOF_UA
 
     /** 15 A. Above this no phone cell is charging or discharging, so the scale-up is wrong. */
     private const val MAX_PLAUSIBLE_UA = 15_000_000L

@@ -71,6 +71,17 @@ class BatteryGuardService : Service() {
     @Volatile private var stopping = false
 
     /**
+     * Set when the guard is standing down *because it has just delivered a reminder*.
+     *
+     * onDestroy cancels the band notification, which is right when the user disarms the
+     * feature — but catastrophically wrong here. The guard now stops immediately after
+     * announcing a threshold, so the cancel wiped the very alert it had just posted and
+     * the user saw nothing at all. The alert is left in place instead; it is dismissible,
+     * so nothing needs to clear it.
+     */
+    @Volatile private var leaveAlertPosted = false
+
+    /**
      * Splits drain between screen-on and screen-off time. Lives here because this is the
      * only component that sees both signals: every one-point level change, and every
      * screen transition. Nothing else in the app is running when the phone is idle.
@@ -135,7 +146,7 @@ class BatteryGuardService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Nothing left to watch — stop rather than sit in the shade doing nothing.
+        // Nothing armed at all — stop rather than sit in the shade doing nothing.
         if (!AppPrefs.guardArmed(this)) {
             stopping = true
             stopSelf()
@@ -166,9 +177,11 @@ class BatteryGuardService : Service() {
         dbThread = null
         workThread?.quitSafely()
         workThread = null
-        // Leaving a band reminder pinned by a service that no longer exists would give the
-        // user a notification nothing can clear.
-        BatteryGuardNotifications.cancelBand(this)
+        // Clear the band reminder ONLY when it is not the reminder we just delivered.
+        // A pinned notification left by a dead service would be unclearable, but the
+        // "told you once" alert is posted dismissible precisely so it can safely outlive
+        // the guard — and cancelling it here made the whole feature silent.
+        if (!leaveAlertPosted) BatteryGuardNotifications.cancelBand(this)
         super.onDestroy()
     }
 
@@ -188,7 +201,12 @@ class BatteryGuardService : Service() {
             strictness = AppPrefs.strictness(this),
             tempAlertC = AppPrefs.tempAlertC(this),
         )
-        if (cfg.lowTarget <= 0 && cfg.highTarget <= 0 && cfg.tempAlertC == null) {
+        if (cfg.lowTarget <= 0 && cfg.highTarget <= 0) {
+            // Release before disappearing. This branch is reached when the user turns
+            // everything off, and stopping here used to remove the only component that
+            // retried the release on each broadcast — so a single failed `su` could leave
+            // a rooted phone refusing to charge until the app process was next created.
+            if (ChargeControl.engagedTarget(this) > 0) postCap { ChargeControl.releaseIfEngaged(this) }
             stopping = true
             stopSelf()
             return
@@ -224,7 +242,15 @@ class BatteryGuardService : Service() {
             d.kind == null -> BatteryGuardNotifications.cancelBand(this)
             else -> {
                 val target = if (d.kind == GuardPolicy.AlertKind.UNPLUG) cfg.highTarget else cfg.lowTarget
-                BatteryGuardNotifications.postBand(this, d.kind, level, target, d.audible)
+                val once = GuardPolicy.repeatMs(d.kind, cfg.strictness) == Long.MAX_VALUE
+                BatteryGuardNotifications.postBand(this, d.kind, level, target, d.audible, dismissible = once)
+                // The reminder has been delivered. On the default "tell me once" setting
+                // that is the whole job, so the episode is closed and the guard can stand
+                // down — which is what takes its card out of the notification shade.
+                if (GuardPolicy.repeatMs(d.kind, cfg.strictness) == Long.MAX_VALUE) {
+                    AppPrefs.setDeliveredFor(this, GuardPolicy.episodeKey(cfg, reading))
+                    leaveAlertPosted = true
+                }
             }
         }
         if (d.tempAlert && tempC != null) {
@@ -239,6 +265,19 @@ class BatteryGuardService : Service() {
         }
 
         recordScreenDrain(level, plugged)
+
+        // Nothing left to catch? Then stop, rather than sitting in the notification shade
+        // implying the app is doing something. The guard exists to see a threshold
+        // crossing exactly; once it has announced one, or when no threshold is anywhere
+        // near, it has no reason to be running. BatteryGuard.sync starts it again when the
+        // cable moves or the level comes back into range.
+        val key = GuardPolicy.episodeKey(cfg, reading)
+        if (!GuardPolicy.shouldWatch(cfg, reading, BatteryGuard.effectiveDeliveredKey(this, key))) {
+            stopping = true
+            stopSelf()
+            return
+        }
+
         updateStatus(cfg, level, plugged, tempC, capHeld)
     }
 
@@ -339,7 +378,13 @@ class BatteryGuardService : Service() {
         val written = ChargeControl.engagedTarget(this) == cfg.highTarget
         return when (kind) {
             ChargeControl.Kind.LEVEL -> written && level >= cfg.highTarget
-            ChargeControl.Kind.SWITCH -> written
+            // A SWITCH cap holds the level just under the target, dropping at most
+            // RESUME_BELOW points before the charge is let back on. Further down than that
+            // and the cap is not holding anything — the release write has been failing and
+            // the phone is draining on the cable. Reporting "held" there put "charging
+            // stopped at your 80% limit" on screen at 12%.
+            ChargeControl.Kind.SWITCH ->
+                written && level >= cfg.highTarget - ChargeControl.RESUME_BELOW - 1
             ChargeControl.Kind.NONE -> false
         }
     }

@@ -60,27 +60,53 @@ object SohForecaster {
 
     /**
      * @param physicsLossFrac raw (unclamped) model capacity-loss fraction at a given
-     *        total cycle count — supplied by the caller from [DegradationModel]. Must be
-     *        monotone non-decreasing in cycles.
+     *        cycle count AND the battery age that goes with it — supplied by the caller
+     *        from [DegradationModel]. Must be monotone non-decreasing in cycles.
+     *
+     *        The age is the second parameter for a reason. The model has two terms and they
+     *        live on different axes: the cyclic term is a function of cycles, the calendar
+     *        term of days. Only this class knows how the two relate, because only it holds
+     *        the measured cycles-per-day. When the caller worked the days out for itself
+     *        from a *different* rate — the lifetime average rather than the recent one —
+     *        the two axes disagreed and the bisection crossed the 80% line at the wrong
+     *        date. On a phone whose recent use is heavier than its lifetime average that
+     *        pushed the replacement date years too early.
+     * @param ageDaysNow battery age today, or null when it is unknown. Passing it lets the
+     *        calendar term be evaluated at the age each point actually had, instead of at
+     *        today's age for every point — which inflated the modelled loss for older
+     *        samples and biased the measured-versus-model ratio toward "aging slower".
      */
     fun forecast(
         samples: List<Sample>,
         cyclesNow: Double,
         nowMs: Long,
-        physicsLossFrac: (cyclesTotal: Double) -> Double,
+        physicsLossFrac: (cyclesTotal: Double, ageDays: Double) -> Double,
+        ageDaysNow: Double? = null,
         halfLifeDays: Double = 75.0,
     ): Forecast {
         val clean = samples.filter { it.sohPct in 1.0..100.0 && it.cycles >= 0.0 }
         val cpd = cyclesPerDay(clean)
 
+        /**
+         * The battery's age at a given cycle count, on the SAME rate used to turn cycles
+         * into dates everywhere else in this class. Without a known age or rate there is
+         * nothing to offset, so today's age stands.
+         */
+        fun ageAt(cycles: Double): Double {
+            val now = ageDaysNow ?: 0.0
+            if (cpd == null || cpd <= 0.0) return now
+            return (now + (cycles - cyclesNow) / cpd).coerceAtLeast(0.0)
+        }
+        val loss = { cycles: Double -> physicsLossFrac(cycles, ageAt(cycles)) }
+
         // Physics floor — always available from the model.
-        val physicsEtaUnscaled = physicsCrossMs(1.0, cyclesNow, cpd, nowMs, physicsLossFrac)
+        val physicsEtaUnscaled = physicsCrossMs(1.0, cyclesNow, cpd, nowMs, loss)
 
         if (clean.size < 3 || cpd == null) {
             return Forecast(
                 if (physicsEtaUnscaled != null) Method.PHYSICS_ONLY else Method.NONE,
                 physicsEtaUnscaled, null, null, null, null, null,
-                physicsCurve(1.0, cyclesNow, cpd, nowMs, physicsEtaUnscaled, physicsLossFrac),
+                physicsCurve(1.0, cyclesNow, cpd, nowMs, physicsEtaUnscaled, loss),
             )
         }
 
@@ -95,7 +121,7 @@ object SohForecaster {
         // Physics scale s: measured loss vs model loss (weighted, through the origin).
         var num = 0.0; var den = 0.0
         for (i in clean.indices) {
-            val m = physicsLossFrac(clean[i].cycles)
+            val m = loss(clean[i].cycles)
             val l = (100.0 - clean[i].sohPct) / 100.0
             num += w[i] * m * l; den += w[i] * m * m
         }
@@ -111,9 +137,9 @@ object SohForecaster {
         // Physics-projected loss over the next year (percentage points), scaled to the
         // user's measured-vs-model ratio. Sub-linear, so it stays small for a worn cell.
         val physicsFadePerYear = (
-            (physicsLossFrac(cyclesNow + cpd * 365.25) - physicsLossFrac(cyclesNow)) * 100.0 * (scale ?: 1.0)
+            (loss(cyclesNow + cpd * 365.25) - loss(cyclesNow)) * 100.0 * (scale ?: 1.0)
             ).coerceAtLeast(0.0)
-        val etaPhysics = physicsCrossMs(scale ?: 1.0, cyclesNow, cpd, nowMs, physicsLossFrac)
+        val etaPhysics = physicsCrossMs(scale ?: 1.0, cyclesNow, cpd, nowMs, loss)
 
         val fadePerYear: Double
         val eta: Long?
@@ -140,9 +166,9 @@ object SohForecaster {
             // re-crossing at scale × (1 ± PHYSICS_SCALE_BAND) brackets a wear rate that
             // is that much faster or slower than measured.
             val s = scale ?: 1.0
-            lo = physicsCrossMs(s * (1.0 + PHYSICS_SCALE_BAND), cyclesNow, cpd, nowMs, physicsLossFrac)
-            hi = physicsCrossMs(s * (1.0 - PHYSICS_SCALE_BAND), cyclesNow, cpd, nowMs, physicsLossFrac)
-            curve = physicsCurve(s, cyclesNow, cpd, nowMs, eta, physicsLossFrac)
+            lo = physicsCrossMs(s * (1.0 + PHYSICS_SCALE_BAND), cyclesNow, cpd, nowMs, loss)
+            hi = physicsCrossMs(s * (1.0 - PHYSICS_SCALE_BAND), cyclesNow, cpd, nowMs, loss)
+            curve = physicsCurve(s, cyclesNow, cpd, nowMs, eta, loss)
         }
 
         return Forecast(

@@ -333,21 +333,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Calendar loss must keep accruing along the projection, not sit frozen at today's
         // value. Holding it constant made the model claim a stored phone ages not at all,
         // and pushed every long-horizon date later than the physics actually supports.
-        // The term goes as days^0.75, so it is re-evaluated at the age the cell will have
-        // reached by the time it has done that many more cycles.
+        //
+        // The age itself now comes FROM the forecaster, as the second argument. Working it
+        // out here was the bug: this method only has the lifetime average cycles-per-day,
+        // while the forecaster dates everything with the recent rate it measured from the
+        // sample window. Two different rates on one axis made the bisection cross the 80%
+        // line at a date the model never supported — years early for anyone whose recent
+        // use is heavier than their lifetime average.
         val ageNow = analysis.ageDays
         val tempC = analysis.modeledTempC
-        val cyclesPerDay = analysis.avgCyclesPerMonth?.let { it / 30.437 }?.takeIf { it > 1e-6 }
         val calFracNow = (analysis.modeledCalendarLossPct ?: 0.0) / 100.0
 
-        return SohForecaster.forecast(samples, cyclesNow, nowMs, physicsLossFrac = { c ->
-            val cal = if (ageNow != null && cyclesPerDay != null) {
-                val daysAhead = ((c - cyclesNow) / cyclesPerDay).coerceAtLeast(0.0)
-                DegradationModel.calendarLossFrac(ageNow + daysAhead, tempC)
-            } else {
-                calFracNow
-            }
-            cal + DegradationModel.cyclicLossFrac(c, design, dod)
-        })
+        return SohForecaster.forecast(
+            samples, cyclesNow, nowMs,
+            physicsLossFrac = { c, ageDays ->
+                val cal = if (ageNow != null) DegradationModel.calendarLossFrac(ageDays, tempC)
+                else calFracNow
+                cal + DegradationModel.cyclicLossFrac(c, design, dod)
+            },
+            ageDaysNow = ageNow,
+        )
     }
 }

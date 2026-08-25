@@ -24,9 +24,9 @@ object GuardPolicy {
     enum class AlertKind { UNPLUG, PLUG_IN, CRITICAL, OVERHEAT }
 
     /**
-     * Battery level at or below which a plug-in reminder stops being a suggestion. Below
-     * this the phone has minutes, not hours, so the reminder escalates to the loudest
-     * setting whatever the user chose — a reminder they slept through is worthless.
+     * Battery level at or below which the reminder changes its wording to say the phone is
+     * about to shut down. It is a different message, not a louder one — the user's choice
+     * about how often to be interrupted is still theirs at 4%.
      */
     const val CRITICAL_LEVEL = 5
 
@@ -90,26 +90,83 @@ object GuardPolicy {
     )
 
     /**
-     * Gap between audible repeats, per reminder and strictness. GENTLE says it once and
-     * then leaves the (still pinned) notification alone; the two louder settings keep
-     * asking for as long as the condition actually holds.
+     * Gap between repeats.
+     *
+     * [Strictness.GENTLE] returns "never", and it is the default. Repeating assumes the
+     * user is ignoring the reminder, and the far more common reason they have not acted is
+     * that they *cannot* — no charger to hand, driving, in a meeting. Buzzing every few
+     * minutes at someone with no charger is not a reminder, it is harassment, and the
+     * thing they eventually silence is the app.
+     *
+     * The louder settings stay for people who deliberately choose them, and CRITICAL no
+     * longer overrides the choice: if the user asked to be told once, being told once at
+     * 4% is still what they asked for.
      */
     fun repeatMs(kind: AlertKind, s: Strictness): Long = when (kind) {
-        // Below CRITICAL_LEVEL the user's strictness choice is overridden: the phone is
-        // about to die and a gentle single chime is not a proportionate response.
-        AlertKind.CRITICAL -> 2 * 60_000L
-        AlertKind.UNPLUG -> when (s) {
+        AlertKind.OVERHEAT -> TEMP_REALERT_MS
+        AlertKind.CRITICAL -> when (s) {
             Strictness.GENTLE -> Long.MAX_VALUE
             Strictness.PERSISTENT -> 5 * 60_000L
             Strictness.INSISTENT -> 2 * 60_000L
         }
-        AlertKind.PLUG_IN -> when (s) {
+        AlertKind.UNPLUG -> when (s) {
             Strictness.GENTLE -> Long.MAX_VALUE
             Strictness.PERSISTENT -> 10 * 60_000L
-            Strictness.INSISTENT -> 3 * 60_000L
+            Strictness.INSISTENT -> 4 * 60_000L
         }
-        AlertKind.OVERHEAT -> TEMP_REALERT_MS
+        AlertKind.PLUG_IN -> when (s) {
+            Strictness.GENTLE -> Long.MAX_VALUE
+            Strictness.PERSISTENT -> 15 * 60_000L
+            Strictness.INSISTENT -> 5 * 60_000L
+        }
     }
+
+    /**
+     * Whether the guard still has a reason to be watching the battery.
+     *
+     * This is what keeps the ongoing card off the screen when nothing is about to happen.
+     * The service exists to catch a threshold crossing exactly; once the crossing has been
+     * announced, or when no threshold is anywhere near, it has no job and should not be
+     * sitting in the notification shade implying it does.
+     *
+     * @param deliveredFor the [episodeKey] the last reminder was announced for, or null.
+     *        Compared against this reading's own key, so a stale value simply stops
+     *        matching rather than silencing the guard for good.
+     */
+    fun shouldWatch(cfg: Config, r: Reading, deliveredFor: String?): Boolean {
+        if (deliveredFor != null && deliveredFor == episodeKey(cfg, r)) return false
+        if (r.pluggedIn) {
+            // Charging is fast — a 65 W charger crosses ten points in under three minutes —
+            // so once the cable is in, watch all the way up rather than trying to time it.
+            //
+            // No `level < highTarget` test, deliberately. Plugging in when ALREADY above the
+            // target is the moment the reminder is most useful, and requiring the level to
+            // be below it meant the guard never started, so that user was never told at all.
+            // The episode flag is what stops it, one reading later, once it has spoken.
+            return cfg.highTarget > 0
+        }
+        // On battery the level falls over hours, so there is no reason to watch from 90%
+        // down. Start only once the target is within reach.
+        return cfg.lowTarget > 0 && r.levelPct > cfg.lowTarget &&
+            r.levelPct <= cfg.lowTarget + WATCH_MARGIN_PCT
+    }
+
+    /**
+     * An opaque description of the situation a reminder belongs to.
+     *
+     * Two readings share a key when telling the user again would say the same thing: same
+     * cable state, same targets. Anything that makes the reminder newly relevant — the
+     * cable moving, the user changing a limit — changes the key, and the guard wakes up.
+     */
+    fun episodeKey(cfg: Config, r: Reading): String =
+        "${if (r.pluggedIn) "in" else "out"}:${cfg.highTarget}:${cfg.lowTarget}"
+
+    /**
+     * How far above the low target the guard starts watching. Fifteen points is roughly
+     * an hour and a half of ordinary use, which is comfortably longer than the worst-case
+     * delay before a background check can start the service.
+     */
+    const val WATCH_MARGIN_PCT = 15
 
     /** The reminder this reading calls for, or null when neither end of the band is breached. */
     fun kindFor(cfg: Config, r: Reading): AlertKind? = when {
@@ -145,13 +202,11 @@ object GuardPolicy {
         // A change of reminder (plug-in escalating to critical, say) always speaks up.
         val changed = kind != prev.activeKind
         val due = nowMs - prev.lastAlertMs >= repeatMs(kind, cfg.strictness)
-        // The repeat budget exists to stop a phone buzzing forever, and it must never be
-        // the reason a *new* or a *critical* alert is silent. An hour of ignored plug-in
-        // reminders on the insistent setting spends the budget, and the escalation to
-        // "about to shut down" then landed with no sound at all — the loudest setting
-        // making the most important alert the quietest.
-        val exempt = changed || kind == AlertKind.CRITICAL
-        val budgetLeft = exempt || prev.audibleCount < MAX_AUDIBLE_REPEATS
+        // A change of alert always speaks, whatever the repeat budget says: an hour of
+        // ignored plug-in reminders on the insistent setting spends the budget, and the
+        // escalation to "about to shut down" would otherwise land silently — the loudest
+        // setting making the most important alert the quietest.
+        val budgetLeft = changed || prev.audibleCount < MAX_AUDIBLE_REPEATS
         val audible = (changed || due) && budgetLeft
 
         return Decision(
@@ -165,6 +220,28 @@ object GuardPolicy {
                 lastTempAlertMs = temp.lastMs,
                 tempArmed = temp.armed,
             ),
+        )
+    }
+
+    /**
+     * Evaluate ONLY the heat condition, leaving every band field of [prev] untouched.
+     *
+     * The hourly sample worker uses this. It must not go through [evaluate], because that
+     * also decides the charge-band reminder and rewrites `activeKind`, `lastAlertMs` and
+     * `audibleCount` — so a background heat check would silently mark a band reminder as
+     * "already given" without ever posting one, and the real alert would then arrive
+     * without a sound or not at all.
+     *
+     * The temperature fields ARE shared with the service on purpose, so the two paths use
+     * one hysteresis window and cannot both warn about the same hot episode.
+     */
+    fun evaluateHeat(cfg: Config, r: Reading, prev: State, nowMs: Long): Decision {
+        val t = evaluateTemp(cfg, r, prev, nowMs)
+        return Decision(
+            kind = prev.activeKind,
+            audible = false,
+            tempAlert = t.fired,
+            state = prev.copy(lastTempAlertMs = t.lastMs, tempArmed = t.armed),
         )
     }
 

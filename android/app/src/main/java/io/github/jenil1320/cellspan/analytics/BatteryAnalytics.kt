@@ -69,6 +69,19 @@ object BatteryAnalytics {
      */
     private const val GAUGE_STUB_TOLERANCE = 0.02
 
+    /**
+     * Shortest battery age from which a per-month or per-year rate may be derived. A month
+     * is where the arithmetic stops amplifying a short span into a nonsense figure.
+     */
+    private const val MIN_DAYS_FOR_LIFETIME_RATES = 30.0
+
+    /**
+     * Above this, a fade rate is not a measurement of anything. A cell losing 60 points of
+     * health in a year is already far past replacement, so a larger figure means the age or
+     * the health reading is wrong rather than that the battery is dying that fast.
+     */
+    private const val MAX_PLAUSIBLE_FADE_PER_YEAR = 60.0
+
     private const val MS_PER_DAY = 86_400_000.0
     private const val DAYS_PER_MONTH = 30.437
     private const val DAYS_PER_YEAR = 365.25
@@ -281,9 +294,19 @@ object BatteryAnalytics {
             val days = (nowMs - mfg * 1000.0) / MS_PER_DAY
             if (days > 0) {
                 ageDays = days
-                val months = days / DAYS_PER_MONTH
-                s.cycleCount?.let { c -> if (c > 0) cyclesPerMonth = c / months }
-                if (soh != null) fadePerYear = (100.0 - soh) / (days / DAYS_PER_YEAR)
+                // Lifetime RATES need a lifetime to divide by. The age itself is fine at
+                // any span, but dividing by a fraction of a day produced figures the user
+                // could only read as broken: a start date set to today — the ordinary flow
+                // after a battery replacement — gave "avg fade / year 4383 pts" and
+                // "avg cycles / month 98860". Below a month there is no rate worth stating.
+                if (days >= MIN_DAYS_FOR_LIFETIME_RATES) {
+                    val months = days / DAYS_PER_MONTH
+                    s.cycleCount?.let { c -> if (c > 0) cyclesPerMonth = c / months }
+                    if (soh != null) {
+                        fadePerYear = ((100.0 - soh) / (days / DAYS_PER_YEAR))
+                            .takeIf { it in 0.0..MAX_PLAUSIBLE_FADE_PER_YEAR }
+                    }
+                }
             }
         }
 
